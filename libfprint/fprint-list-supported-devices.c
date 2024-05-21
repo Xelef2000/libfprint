@@ -29,7 +29,7 @@
 GHashTable *printed = NULL;
 
 static void
-insert_drivers (GList **usb_list, GList **spi_list)
+insert_drivers (GList **usb_list, GList **spi_list, GList **misc_list)
 {
   g_autoptr(GArray) drivers = fpi_get_driver_types ();
   gint i;
@@ -68,12 +68,20 @@ insert_drivers (GList **usb_list, GList **spi_list)
           for (entry = cls->id_table; entry->udev_types; entry++)
             {
               char *key;
+              int is_misc_device = entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_MISC;
 
-              /* Need SPI device */
-              if ((entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_SPIDEV) == 0)
-                continue;
+              if (is_misc_device)
+                {
+                  key = g_strdup_printf ("misc:%s", entry->misc_name);
+                }
+              else
+                {
+                  /* Need SPI device */
+                  if ((entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_SPIDEV) == 0)
+                    continue;
 
-              key = g_strdup_printf ("SPI:%s:%04x:%04x", entry->spi_acpi_id, entry->hid_id.vid, entry->hid_id.pid);
+                  key = g_strdup_printf ("SPI:%s:%04x:%04x", entry->spi_acpi_id, entry->hid_id.vid, entry->hid_id.pid);
+                }
 
               if (g_hash_table_lookup (printed, key) != NULL)
                 {
@@ -83,7 +91,10 @@ insert_drivers (GList **usb_list, GList **spi_list)
 
               g_hash_table_insert (printed, key, GINT_TO_POINTER (1));
 
-              if (entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_HIDRAW)
+              if (is_misc_device)
+                *misc_list = g_list_prepend (*misc_list,
+                                             g_strdup_printf ("%s | %s\n", entry->misc_name, cls->full_name));
+              else if (entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_HIDRAW)
                 *spi_list = g_list_prepend (*spi_list,
                                             g_strdup_printf ("%s | %04x:%04x | %s\n", entry->spi_acpi_id, entry->hid_id.vid, entry->hid_id.pid, cls->full_name));
               else
@@ -104,6 +115,7 @@ main (int argc, char **argv)
 {
   GList *usb_list = NULL;
   GList *spi_list = NULL;
+  GList *misc_list = NULL;
   GList *l;
 
   setlocale (LC_ALL, "");
@@ -120,7 +132,7 @@ main (int argc, char **argv)
   g_print ("This is a list of supported devices in libfprint's development version. Those drivers might not all be available in the stable, released version. If in doubt, contact your distribution or systems integrator for details.\n");
   g_print ("\n");
 
-  insert_drivers (&usb_list, &spi_list);
+  insert_drivers (&usb_list, &spi_list, &misc_list);
 
   g_print ("## USB devices\n");
   g_print ("\n");
@@ -147,6 +159,18 @@ main (int argc, char **argv)
   g_print ("\n");
 
   g_list_free_full (g_steal_pointer (&spi_list), g_free);
+
+  g_print ("## Misc devices\n");
+  g_print ("\n");
+  g_print ("Name | Driver\n");
+  g_print ("------------ | ------------\n");
+
+  misc_list = g_list_sort (misc_list, (GCompareFunc) g_strcmp0);
+  for (l = misc_list; l != NULL; l = l->next)
+    g_print ("%s", (char *) l->data);
+  g_print ("\n");
+
+  g_list_free_full (g_steal_pointer (&misc_list), g_free);
 
 
   g_hash_table_destroy (printed);

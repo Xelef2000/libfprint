@@ -435,6 +435,9 @@ fpi_device_get_udev_data (FpDevice *device, FpiDeviceUdevSubtypeFlags subtype)
     case FPI_DEVICE_UDEV_SUBTYPE_SPIDEV:
       return priv->udev_data.spidev_path;
 
+    case FPI_DEVICE_UDEV_SUBTYPE_MISC:
+      return priv->udev_data.misc_path;
+
     default:
       g_return_val_if_reached (NULL);
       return NULL;

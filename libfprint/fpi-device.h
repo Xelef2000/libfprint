@@ -28,12 +28,14 @@
  * FpiDeviceUdevSubtypeFlags:
  * @FPI_DEVICE_UDEV_SUBTYPE_SPIDEV: The device requires an spidev node
  * @FPI_DEVICE_UDEV_SUBTYPE_HIDRAW: The device requires a hidraw node
+ * @FPI_DEVICE_UDEV_SUBTYPE_MISC: The device requires a misc node
  *
  * Bitfield of required hardware resources for a udev-backed device.
  */
 typedef enum {
   FPI_DEVICE_UDEV_SUBTYPE_SPIDEV = 1 << 0,
   FPI_DEVICE_UDEV_SUBTYPE_HIDRAW = 1 << 1,
+  FPI_DEVICE_UDEV_SUBTYPE_MISC = 1 << 2,
 } FpiDeviceUdevSubtypeFlags;
 
 /**
@@ -64,6 +66,7 @@ struct _FpIdEntry
         guint pid;
         guint vid;
       } hid_id;
+      const gchar *misc_name;
     };
   };
   guint64 driver_data;
