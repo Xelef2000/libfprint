@@ -5,6 +5,7 @@ examples = [
     'img-capture',
     'manage-prints',
     'verify',
+    'clear-storage',
 ]
 
 foreach example: examples

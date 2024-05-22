@@ -26,6 +26,7 @@
 #include "storage.h"
 
 #include <errno.h>
+#include <glib/gstdio.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -206,6 +207,12 @@ gallery_data_load (FpDevice *dev)
     }
 
   return gallery;
+}
+
+int
+clear_saved_prints (void)
+{
+  return g_remove (STORAGE_FILE);
 }
 
 FpPrint *

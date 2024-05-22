@@ -1825,14 +1825,6 @@ fp_device_clear_storage (FpDevice           *device,
       return;
     }
 
-  if (!(priv->features & FP_DEVICE_FEATURE_STORAGE))
-    {
-      g_task_return_error (task,
-                           fpi_device_error_new_msg (FP_DEVICE_ERROR_NOT_SUPPORTED,
-                                                     "Device has no storage."));
-      return;
-    }
-
   if (!(priv->features & FP_DEVICE_FEATURE_STORAGE_CLEAR))
     {
       g_task_return_error (task,
