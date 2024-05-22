@@ -23,7 +23,6 @@
 #include <sys/fcntl.h> 
 
 #include "drivers_api.h"
-#include "crfpmoc_storage.h"
 #include "crfpmoc.h"
 
 struct _FpiDeviceCrfpMoc
@@ -71,12 +70,41 @@ static const gchar *const crfpmoc_meanings[] = {
 	"DUP_UNAVAILABLE",
 };
 
-static const gchar *crfpmoc_strresult (int i)
+static const gchar *
+crfpmoc_strresult (int i)
 {
   int crfpmoc_meanings_len = sizeof (crfpmoc_meanings) / sizeof (crfpmoc_meanings[0]);
 	if (i < 0 || i >= crfpmoc_meanings_len)
 		return "<unknown>";
 	return crfpmoc_meanings[i];
+}
+
+static char *
+get_print_data_descriptor (FpPrint *print, gint8 template)
+{
+  const char *driver;
+  const char *dev_id;
+
+  driver = fp_print_get_driver (print);
+  dev_id = fp_print_get_device_id (print);
+
+  return g_strdup_printf ("%s/%s/%d", driver, dev_id, template);
+}
+
+static void
+crfpmoc_set_print_data (FpPrint *print, gint8 template)
+{
+  g_autofree gchar *descr = NULL;
+  GVariant *print_id_var = NULL;
+  GVariant *fpi_data = NULL;
+
+  fpi_print_set_type (print, FPI_PRINT_RAW);
+  fpi_print_set_device_stored (print, TRUE);
+
+  descr = get_print_data_descriptor (print, template);
+  print_id_var = g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, descr, strlen (descr), sizeof (guchar));
+  fpi_data = g_variant_new ("(@ay)", print_id_var);
+  g_object_set (print, "fpi-data", fpi_data, NULL);
 }
 
 static int
@@ -368,12 +396,9 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       user_id = fpi_print_generate_user_id (enroll_print->print);
       fp_dbg ("New fingerprint ID: %s", user_id);
 
-      fpi_print_set_type (enroll_print->print, FPI_PRINT_RAW);
-      fpi_print_set_device_stored (enroll_print->print, TRUE);
-
       g_object_set (enroll_print->print, "description", user_id, NULL);
 
-      print_data_save (enroll_print->print, enrolled_templates - 1);
+      crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1);
 
       fp_info ("Enrollment was successful!");
       fpi_device_enroll_complete (device, g_object_ref (enroll_print->print), NULL);
@@ -479,9 +504,10 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
                     }
                   else
                     {
-                      print = print_data_load (device, template);
+                      print = fp_print_new (device);
+                      crfpmoc_set_print_data (print, template);
 
-                      fp_info ("Identify successful for: %s", fp_print_get_description (print));
+                      fp_info ("Identify successful for template %d", template);
 
                       if (is_identify)
                         {
@@ -587,32 +613,6 @@ crfpmoc_clear_storage (FpDevice *device)
 }
 
 static void
-crfpmoc_list_run_state (FpiSsm *ssm, FpDevice *device)
-{
-  g_autoptr(GPtrArray) enrolled_prints = NULL;
-
-  switch (fpi_ssm_get_cur_state (ssm))
-    {
-    case LIST_RETURN_ENROLLED_PRINTS:
-      enrolled_prints = gallery_data_load (device);
-      fpi_device_list_complete (device, g_steal_pointer (&enrolled_prints), NULL);
-      fpi_ssm_mark_completed (ssm);
-      break;
-    }
-}
-
-static void
-crfpmoc_list (FpDevice *device)
-{
-  fp_dbg ("List");
-  FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
-
-  g_assert (self->task_ssm == NULL);
-  self->task_ssm = fpi_ssm_new (device, crfpmoc_list_run_state, LIST_STATES);
-  fpi_ssm_start (self->task_ssm, crfpmoc_task_ssm_done);
-}
-
-static void
 fpi_device_crfpmoc_init (FpiDeviceCrfpMoc *self)
 {
   G_DEBUG_HERE ();
@@ -641,7 +641,6 @@ fpi_device_crfpmoc_class_init (FpiDeviceCrfpMocClass *klass)
   dev_class->identify = crfpmoc_identify_verify;
   dev_class->verify = crfpmoc_identify_verify;
   dev_class->clear_storage = crfpmoc_clear_storage;
-  dev_class->list = crfpmoc_list;
 
   fpi_device_class_auto_initialize_features (dev_class);
 }

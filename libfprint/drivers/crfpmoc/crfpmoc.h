@@ -176,8 +176,3 @@ typedef enum {
   CLEAR_STORAGE_SENSOR_RESET,
   CLEAR_STORAGE_STATES,
 } ClearStorageStates;
-
-typedef enum {
-  LIST_RETURN_ENROLLED_PRINTS,
-  LIST_STATES,
-} ListStates;
