@@ -37,7 +37,7 @@ G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC,
 
 #define CRFPMOC_NR_ENROLL_STAGES 5
 
-#define CRFPMOC_FINGER_SCAN_DELAY 1000
+#define CRFPMOC_SSM_DELAY 100
 
 /* crfpmoc_ec_command return value for non-success result from EC */
 #define CRFPMOC_EECRESULT 1000
