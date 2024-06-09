@@ -20,7 +20,8 @@
 
 #define FP_COMPONENT "crfpmoc"
 
-#include <sys/fcntl.h> 
+#include <sys/fcntl.h>
+#include <sys/poll.h>
 
 #include "drivers_api.h"
 #include "crfpmoc.h"
@@ -47,36 +48,36 @@ static const FpIdEntry crfpmoc_id_table[] = {
 };
 
 static const gchar *const crfpmoc_meanings[] = {
-	"SUCCESS",
-	"INVALID_COMMAND",
-	"ERROR",
-	"INVALID_PARAM",
-	"ACCESS_DENIED",
-	"INVALID_RESPONSE",
-	"INVALID_VERSION",
-	"INVALID_CHECKSUM",
-	"IN_PROGRESS",
-	"UNAVAILABLE",
-	"TIMEOUT",
-	"OVERFLOW",
-	"INVALID_HEADER",
-	"REQUEST_TRUNCATED",
-	"RESPONSE_TOO_BIG",
-	"BUS_ERROR",
-	"BUSY",
-	"INVALID_HEADER_VERSION",
-	"INVALID_HEADER_CRC",
-	"INVALID_DATA_CRC",
-	"DUP_UNAVAILABLE",
+  "SUCCESS",
+  "INVALID_COMMAND",
+  "ERROR",
+  "INVALID_PARAM",
+  "ACCESS_DENIED",
+  "INVALID_RESPONSE",
+  "INVALID_VERSION",
+  "INVALID_CHECKSUM",
+  "IN_PROGRESS",
+  "UNAVAILABLE",
+  "TIMEOUT",
+  "OVERFLOW",
+  "INVALID_HEADER",
+  "REQUEST_TRUNCATED",
+  "RESPONSE_TOO_BIG",
+  "BUS_ERROR",
+  "BUSY",
+  "INVALID_HEADER_VERSION",
+  "INVALID_HEADER_CRC",
+  "INVALID_DATA_CRC",
+  "DUP_UNAVAILABLE",
 };
 
 static const gchar *
 crfpmoc_strresult (int i)
 {
   int crfpmoc_meanings_len = sizeof (crfpmoc_meanings) / sizeof (crfpmoc_meanings[0]);
-	if (i < 0 || i >= crfpmoc_meanings_len)
-		return "<unknown>";
-	return crfpmoc_meanings[i];
+  if (i < 0 || i >= crfpmoc_meanings_len)
+    return "<unknown>";
+  return crfpmoc_meanings[i];
 }
 
 static char *
@@ -145,15 +146,6 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
               fp_warn ("ioctl %d, errno %d (%s), EC result %d (%s)", r, errno, strerror (errno), s_cmd->result, crfpmoc_strresult (s_cmd->result));
             }
         }
-      else if (errno == ETIMEDOUT)
-        {
-          g_usleep (CRFPMOC_TIMEOUT_RETRY_DELAY_MICROSECONDS);
-          r = ioctl (self->fd, CRFPMOC_CROS_EC_DEV_IOCXCMD_V2, s_cmd);
-          if (r < 0)
-            {
-              fp_warn ("ioctl %d, errno %d (%s), EC result %d (%s)", r, errno, strerror (errno), s_cmd->result, crfpmoc_strresult (s_cmd->result));
-            }
-        }
       else
         {
           fp_warn ("ioctl %d, errno %d (%s), EC result %d (%s)", r, errno, strerror (errno), s_cmd->result, crfpmoc_strresult (s_cmd->result));
@@ -178,10 +170,36 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
 }
 
 static int
+crfpmoc_ec_pollevent (FpiDeviceCrfpMoc *self, unsigned long mask, void *buffer, size_t buf_size, int timeout)
+{
+  int rv;
+  struct pollfd pf = { .fd = self->fd, .events = POLLIN };
+
+  rv = ioctl (self->fd, CRFPMOC_CROS_EC_DEV_IOCEVENTMASK_V2, mask);
+  if (rv < 0)
+    {
+      return -rv;
+    }
+
+  rv = poll (&pf, 1, timeout);
+  if (rv != 1)
+    {
+      return rv;
+    }
+
+  if (pf.revents != POLLIN)
+    {
+      return -pf.revents;
+    }
+
+  return read (self->fd, buffer, buf_size);
+}
+
+static int
 crfpmoc_cmd_fp_mode (FpiDeviceCrfpMoc *self, guint32 inmode, guint32 *outmode, const gchar **error_msg)
 {
   struct crfpmoc_ec_params_fp_mode p;
-	struct crfpmoc_ec_response_fp_mode r;
+  struct crfpmoc_ec_response_fp_mode r;
   int rv;
 
   p.mode = inmode;
@@ -237,6 +255,30 @@ crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, const gchar **err
       *template = r.template_matched;
     }
 
+  return 0;
+}
+
+static int
+crfpmoc_cmd_wait_event_fingerprint (FpiDeviceCrfpMoc *self)
+{
+  int rv;
+  struct crfpmoc_ec_response_get_next_event_v1 buffer;
+  long timeout = 5000;
+  long event_type = CRFPMOC_EC_MKBP_EVENT_FINGERPRINT;
+
+  rv = crfpmoc_ec_pollevent (self, 1 << event_type, &buffer, sizeof (buffer), timeout);
+  if (rv == 0)
+    {
+      fp_warn ("Timeout waiting for MKBP event");
+      return -ETIMEDOUT;
+    }
+  else if (rv < 0)
+    {
+      fp_warn ("Error polling for MKBP event");
+      return -EIO;
+    }
+
+  fp_dbg ("MKBP event %d data", buffer.event_type);
   return 0;
 }
 
@@ -345,7 +387,22 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
 
     case ENROLL_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
-      fpi_ssm_next_state (ssm);
+      r = crfpmoc_cmd_wait_event_fingerprint (self);
+      if (r < 0)
+        {
+          if (r == -ETIMEDOUT)
+            {
+              fpi_ssm_jump_to_state (ssm, ENROLL_WAIT_FINGER);
+            }
+          else
+            {
+              fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
+            }
+        }
+      else
+        {
+          fpi_ssm_next_state (ssm);
+        }
       break;
 
     case ENROLL_SENSOR_CHECK:
@@ -454,7 +511,22 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
     
     case VERIFY_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
-      fpi_ssm_next_state (ssm);
+      r = crfpmoc_cmd_wait_event_fingerprint (self);
+      if (r < 0)
+        {
+          if (r == -ETIMEDOUT)
+            {
+              fpi_ssm_jump_to_state (ssm, VERIFY_WAIT_FINGER);
+            }
+          else
+            {
+              fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
+            }
+        }
+      else
+        {
+          fpi_ssm_next_state (ssm);
+        }
       break;
     
     case VERIFY_SENSOR_CHECK:

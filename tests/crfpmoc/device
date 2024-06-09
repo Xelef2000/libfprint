@@ -60,9 +60,9 @@ E: SUBSYSTEM=serial-base
 L: driver=../../../../../bus/serial-base/drivers/port
 A: power/autosuspend_delay_ms=500\n
 A: power/control=auto\n
-A: power/runtime_active_time=31736669\n
+A: power/runtime_active_time=19045089\n
 A: power/runtime_status=active\n
-A: power/runtime_suspended_time=5190\n
+A: power/runtime_suspended_time=1840\n
 
 P: /devices/platform/AMDI0020:01/AMDI0020:01:0
 E: DEVTYPE=ctrl
@@ -70,9 +70,9 @@ E: DRIVER=ctrl
 E: SUBSYSTEM=serial-base
 L: driver=../../../../bus/serial-base/drivers/ctrl
 A: power/control=auto\n
-A: power/runtime_active_time=31736676\n
+A: power/runtime_active_time=19045095\n
 A: power/runtime_status=active\n
-A: power/runtime_suspended_time=5190\n
+A: power/runtime_suspended_time=1840\n
 
 P: /devices/platform/AMDI0020:01
 E: DRIVER=dw-apb-uart
@@ -86,8 +86,8 @@ A: driver_override=(null)\n
 L: firmware_node=../../LNXSYSTM:00/LNXSYBUS:00/AMDI0020:01
 A: modalias=acpi:AMDI0020:\n
 A: power/control=auto\n
-A: power/runtime_active_time=31736687\n
+A: power/runtime_active_time=19045115\n
 A: power/runtime_status=active\n
-A: power/runtime_suspended_time=5189\n
+A: power/runtime_suspended_time=1826\n
 L: software_node=../../../kernel/software_nodes/node1
 
