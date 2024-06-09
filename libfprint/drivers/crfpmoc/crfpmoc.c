@@ -28,10 +28,10 @@
 
 struct _FpiDeviceCrfpMoc
 {
-  FpDevice parent;
-  FpiSsm *task_ssm;
+  FpDevice      parent;
+  FpiSsm       *task_ssm;
   GCancellable *interrupt_cancellable;
-  int fd;
+  int           fd;
 };
 
 G_DEFINE_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FP_TYPE_DEVICE)
@@ -39,7 +39,7 @@ G_DEFINE_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FP_TYPE_DEVICE)
 typedef struct crfpmoc_enroll_print
 {
   FpPrint *print;
-  int stage;
+  int      stage;
 } EnrollPrint;
 
 static const FpIdEntry crfpmoc_id_table[] = {
@@ -75,6 +75,7 @@ static const gchar *
 crfpmoc_strresult (int i)
 {
   int crfpmoc_meanings_len = sizeof (crfpmoc_meanings) / sizeof (crfpmoc_meanings[0]);
+
   if (i < 0 || i >= crfpmoc_meanings_len)
     return "<unknown>";
   return crfpmoc_meanings[i];
@@ -121,9 +122,7 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
   if (s_cmd == NULL)
     {
       if (error_msg != NULL)
-        {
-          *error_msg = crfpmoc_strresult (EC_RES_ERROR);
-        }
+        *error_msg = crfpmoc_strresult (EC_RES_ERROR);
       return -EC_RES_ERROR;
     }
 
@@ -142,9 +141,7 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
           s_cmd->command = CRFPMOC_EC_CMD_RESEND_RESPONSE;
           r = ioctl (self->fd, CRFPMOC_CROS_EC_DEV_IOCXCMD_V2, s_cmd);
           if (r < 0)
-            {
-              fp_warn ("ioctl %d, errno %d (%s), EC result %d (%s)", r, errno, strerror (errno), s_cmd->result, crfpmoc_strresult (s_cmd->result));
-            }
+            fp_warn ("ioctl %d, errno %d (%s), EC result %d (%s)", r, errno, strerror (errno), s_cmd->result, crfpmoc_strresult (s_cmd->result));
         }
       else
         {
@@ -163,9 +160,7 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
   g_free (s_cmd);
 
   if (error_msg != NULL)
-    {
-      *error_msg = crfpmoc_strresult (s_cmd->result);
-    }
+    *error_msg = crfpmoc_strresult (s_cmd->result);
   return r;
 }
 
@@ -177,20 +172,14 @@ crfpmoc_ec_pollevent (FpiDeviceCrfpMoc *self, unsigned long mask, void *buffer, 
 
   rv = ioctl (self->fd, CRFPMOC_CROS_EC_DEV_IOCEVENTMASK_V2, mask);
   if (rv < 0)
-    {
-      return -rv;
-    }
+    return -rv;
 
   rv = poll (&pf, 1, timeout);
   if (rv != 1)
-    {
-      return rv;
-    }
+    return rv;
 
   if (pf.revents != POLLIN)
-    {
-      return -pf.revents;
-    }
+    return -pf.revents;
 
   return read (self->fd, buffer, buf_size);
 }
@@ -209,9 +198,7 @@ crfpmoc_cmd_fp_mode (FpiDeviceCrfpMoc *self, guint32 inmode, guint32 *outmode, c
 
   fp_dbg ("FP mode: (0x%x)", r.mode);
   if (outmode != NULL)
-    {
-      *outmode = r.mode;
-    }
+    *outmode = r.mode;
 
   return 0;
 }
@@ -376,13 +363,9 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
     case ENROLL_SENSOR_ENROLL:
       r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_ENROLL_IMAGE | CRFPMOC_FP_MODE_ENROLL_SESSION, &mode, &error_msg);
       if (r < 0)
-        {
-          fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
-        }
+        fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
       else
-        {
-          fpi_ssm_next_state (ssm);
-        }
+        fpi_ssm_next_state (ssm);
       break;
 
     case ENROLL_WAIT_FINGER:
@@ -391,13 +374,9 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       if (r < 0)
         {
           if (r == -ETIMEDOUT)
-            {
-              fpi_ssm_jump_to_state (ssm, ENROLL_WAIT_FINGER);
-            }
+            fpi_ssm_jump_to_state (ssm, ENROLL_WAIT_FINGER);
           else
-            {
-              fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
-            }
+            fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
         }
       else
         {
@@ -446,6 +425,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
             }
         }
       break;
+
     case ENROLL_COMMIT:
       crfpmoc_cmd_fp_info (self, &enrolled_templates, &error_msg);
       fp_dbg ("Number of enrolled templates is: %d", enrolled_templates);
@@ -500,35 +480,27 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
     case VERIFY_SENSOR_MATCH:
       r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_MATCH, &mode, &error_msg);
       if (r < 0)
-        {
-          fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
-        }
+        fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
       else
-        {
-          fpi_ssm_next_state (ssm);
-        }
+        fpi_ssm_next_state (ssm);
       break;
-    
+
     case VERIFY_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
       r = crfpmoc_cmd_wait_event_fingerprint (self);
       if (r < 0)
         {
           if (r == -ETIMEDOUT)
-            {
-              fpi_ssm_jump_to_state (ssm, VERIFY_WAIT_FINGER);
-            }
+            fpi_ssm_jump_to_state (ssm, VERIFY_WAIT_FINGER);
           else
-            {
-              fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
-            }
+            fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
         }
       else
         {
           fpi_ssm_next_state (ssm);
         }
       break;
-    
+
     case VERIFY_SENSOR_CHECK:
       r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error_msg);
       if (r < 0)
@@ -558,13 +530,9 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
                       fp_info ("Print was not identified by the device");
 
                       if (is_identify)
-                        {
-                          fpi_device_identify_report (device, NULL, NULL, NULL);
-                        }
+                        fpi_device_identify_report (device, NULL, NULL, NULL);
                       else
-                        {
-                          fpi_device_verify_report (device, FPI_MATCH_FAIL, NULL, NULL);
-                        }
+                        fpi_device_verify_report (device, FPI_MATCH_FAIL, NULL, NULL);
                     }
                   else
                     {
@@ -598,13 +566,9 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
                         }
                     }
                   if (fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_VERIFY)
-                    {
-                      fpi_device_verify_complete (device, NULL);
-                    }
+                    fpi_device_verify_complete (device, NULL);
                   else
-                    {
-                      fpi_device_identify_complete (device, NULL);
-                    }
+                    fpi_device_identify_complete (device, NULL);
                   fpi_ssm_mark_completed (ssm);
                 }
             }

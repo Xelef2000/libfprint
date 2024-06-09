@@ -88,7 +88,7 @@ on_clear_storage_completed (FpDevice *dev, GAsyncResult *res, void *user_data)
     }
   else
     {
-      int r = clear_saved_prints();
+      int r = clear_saved_prints ();
       if (r < 0)
         {
           g_warning ("Clear saved prints from local storage failed, code %d", r);
@@ -181,10 +181,10 @@ main (void)
   clear_storage_data->loop = g_main_loop_new (NULL, FALSE);
   clear_storage_data->cancellable = g_cancellable_new ();
   clear_storage_data->sigint_handler = g_unix_signal_add_full (G_PRIORITY_HIGH,
-                                                          SIGINT,
-                                                          sigint_cb,
-                                                          clear_storage_data,
-                                                          NULL);
+                                                               SIGINT,
+                                                               sigint_cb,
+                                                               clear_storage_data,
+                                                               NULL);
   fp_device_open (dev, clear_storage_data->cancellable,
                   (GAsyncReadyCallback) on_device_opened,
                   clear_storage_data);

@@ -63,27 +63,32 @@ G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC,
 /* New Fingerprint sensor event, the event data is fp_events bitmap. */
 #define CRFPMOC_EC_MKBP_EVENT_FINGERPRINT 5
 
-struct crfpmoc_ec_params_fp_mode {
+struct crfpmoc_ec_params_fp_mode
+{
   guint32 mode; /* as defined by CRFPMOC_FP_MODE_ constants */
 } __attribute__((packed));
 
-struct crfpmoc_ec_response_fp_mode {
+struct crfpmoc_ec_response_fp_mode
+{
   guint32 mode; /* as defined by CRFPMOC_FP_MODE_ constants */
 } __attribute__((packed));
 
-struct crfpmoc_ec_response_fp_stats {
+struct crfpmoc_ec_response_fp_stats
+{
   guint32 capture_time_us;
   guint32 matching_time_us;
   guint32 overall_time_us;
-  struct {
+  struct
+  {
     guint32 lo;
     guint32 hi;
   } overall_t0;
   guint8 timestamps_invalid;
-  gint8 template_matched;
+  gint8  template_matched;
 } __attribute__((packed));
 
-struct crfpmoc_ec_response_fp_info {
+struct crfpmoc_ec_response_fp_info
+{
   /* Sensor identification */
   guint32 vendor_id;
   guint32 product_id;
@@ -105,7 +110,8 @@ struct crfpmoc_ec_response_fp_info {
 } __attribute__((packed));
 
 /* Note: used in crfpmoc_ec_response_get_next_data_v1 */
-struct crfpmoc_ec_response_motion_sense_fifo_info {
+struct crfpmoc_ec_response_motion_sense_fifo_info
+{
   /* Size of the fifo */
   guint16 size;
   /* Amount of space used in the fifo */
@@ -120,16 +126,18 @@ struct crfpmoc_ec_response_motion_sense_fifo_info {
   guint16 lost[0];
 };
 
-union __attribute__((packed)) crfpmoc_ec_response_get_next_data_v1 {
+union __attribute__((packed)) crfpmoc_ec_response_get_next_data_v1
+{
   guint8 key_matrix[16];
 
   /* Unaligned */
   guint32 host_event;
   guint64 host_event64;
 
-  struct {
+  struct
+  {
     /* For aligning the fifo_info */
-    guint8 reserved[3];
+    guint8                                            reserved[3];
     struct crfpmoc_ec_response_motion_sense_fifo_info info;
   } sensor_fifo;
 
@@ -143,11 +151,12 @@ union __attribute__((packed)) crfpmoc_ec_response_get_next_data_v1 {
 
   guint32 cec_events;
 
-  guint8 cec_message[16];
+  guint8  cec_message[16];
 };
 
-struct crfpmoc_ec_response_get_next_event_v1 {
-  guint8 event_type;
+struct crfpmoc_ec_response_get_next_event_v1
+{
+  guint8                                     event_type;
   /* Followed by event data if any */
   union crfpmoc_ec_response_get_next_data_v1 data;
 } __attribute__((packed));
@@ -160,19 +169,20 @@ struct crfpmoc_ec_response_get_next_event_v1 {
  * @result: EC's response to the command (separate from communication failure)
  * @data: Where to put the incoming data from EC and outgoing data to EC
  */
-struct crfpmoc_cros_ec_command_v2 {
+struct crfpmoc_cros_ec_command_v2
+{
   guint32 version;
   guint32 command;
   guint32 outsize;
   guint32 insize;
   guint32 result;
-  guint8 data[0];
+  guint8  data[0];
 };
 
 #define CRFPMOC_CROS_EC_DEV_IOC_V2 0xEC
 #define CRFPMOC_CROS_EC_DEV_IOCXCMD_V2 \
-  _IOWR(CRFPMOC_CROS_EC_DEV_IOC_V2, 0, struct crfpmoc_cros_ec_command_v2)
-#define CRFPMOC_CROS_EC_DEV_IOCEVENTMASK_V2 _IO(CRFPMOC_CROS_EC_DEV_IOC_V2, 2)
+        _IOWR (CRFPMOC_CROS_EC_DEV_IOC_V2, 0, struct crfpmoc_cros_ec_command_v2)
+#define CRFPMOC_CROS_EC_DEV_IOCEVENTMASK_V2 _IO (CRFPMOC_CROS_EC_DEV_IOC_V2, 2)
 
 /*
  * Host command response codes (16-bit).
