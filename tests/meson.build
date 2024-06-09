@@ -59,6 +59,7 @@ drivers_tests = [
 	'realtek',
 	'realtek-5816',
     'focaltech_moc',
+    'crfpmoc',
 ]
 
 if get_option('introspection')
@@ -68,6 +69,9 @@ if get_option('introspection')
   configure_file(configuration: conf,
       input: 'create-driver-test.py.in',
       output: 'create-driver-test.py')
+  configure_file(configuration: conf,
+      input: 'create-misc-driver-test.py.in',
+      output: 'create-misc-driver-test.py')
 endif
 
 env_parser_cmd = '''
