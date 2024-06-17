@@ -307,7 +307,7 @@ fp_device_get_property (GObject    *object,
 
     case PROP_FPI_UDEV_DATA_MISC:
       if (cls->type == FP_DEVICE_TYPE_UDEV)
-        g_value_set_string (value, g_strdup (priv->udev_data.misc_path));
+        g_value_set_string (value, priv->udev_data.misc_path);
       else
         g_value_set_string (value, NULL);
       break;

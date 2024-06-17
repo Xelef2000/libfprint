@@ -157,10 +157,12 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
           r = -CRFPMOC_EECRESULT - s_cmd->result;
         }
     }
-  g_free (s_cmd);
 
   if (error_msg != NULL)
     *error_msg = crfpmoc_strresult (s_cmd->result);
+
+  g_free (s_cmd);
+
   return r;
 }
 
@@ -249,7 +251,7 @@ static int
 crfpmoc_cmd_wait_event_fingerprint (FpiDeviceCrfpMoc *self)
 {
   int rv;
-  struct crfpmoc_ec_response_get_next_event_v1 buffer;
+  struct crfpmoc_ec_response_get_next_event_v1 buffer = { 0 };
   long timeout = 5000;
   long event_type = CRFPMOC_EC_MKBP_EVENT_FINGERPRINT;
 
