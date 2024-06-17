@@ -218,7 +218,7 @@ clear_saved_prints (GError **error)
                            "Failed to clear prints");
       return FALSE;
     }
-    
+
   return TRUE;
 }
 
