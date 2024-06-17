@@ -131,7 +131,8 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
   s_cmd->result = 0xff;
   s_cmd->outsize = outsize;
   s_cmd->insize = insize;
-  memcpy (s_cmd->data, outdata, outsize);
+  if (outdata != NULL)
+    memcpy (s_cmd->data, outdata, outsize);
 
   r = ioctl (self->fd, CRFPMOC_CROS_EC_DEV_IOCXCMD_V2, s_cmd);
   if (r < 0)
