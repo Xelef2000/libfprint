@@ -538,7 +538,7 @@ fp_context_enumerate (FpContext *context)
                     const gchar * sysfs = g_udev_device_get_sysfs_path (matched_misc->data);
                     if (!sysfs)
                       continue;
-                    if (strstr (sysfs, entry->misc_name))
+                    if (g_str_has_suffix (sysfs, entry->misc_name))
                       break;
                   }
                 /* If match was not found exit */
