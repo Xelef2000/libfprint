@@ -108,7 +108,14 @@ crfpmoc_set_print_data (FpPrint *print, gint8 template)
 }
 
 static int
-crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void *outdata, int outsize, void *indata, int insize, const gchar **error_msg)
+crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
+                    int               command,
+                    int               version,
+                    const void       *outdata,
+                    int               outsize,
+                    void             *indata,
+                    int               insize,
+                    GError          **error)
 {
   g_autofree struct crfpmoc_cros_ec_command_v2 *s_cmd = NULL;
   int r;
@@ -119,8 +126,7 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
   s_cmd = g_malloc0 (sizeof (struct crfpmoc_cros_ec_command_v2) + MAX (outsize, insize));
   if (s_cmd == NULL)
     {
-      if (error_msg != NULL)
-        *error_msg = crfpmoc_strresult (EC_RES_ERROR);
+      g_propagate_error (error, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", crfpmoc_strresult (EC_RES_ERROR)));
       return -EC_RES_ERROR;
     }
 
@@ -157,8 +163,8 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
         }
     }
 
-  if (error_msg != NULL)
-    *error_msg = crfpmoc_strresult (s_cmd->result);
+  if (r < 0)
+    g_propagate_error (error, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", crfpmoc_strresult (s_cmd->result)));
 
   return r;
 }
@@ -184,14 +190,14 @@ crfpmoc_ec_pollevent (FpiDeviceCrfpMoc *self, unsigned long mask, void *buffer, 
 }
 
 static int
-crfpmoc_cmd_fp_mode (FpiDeviceCrfpMoc *self, guint32 inmode, guint32 *outmode, const gchar **error_msg)
+crfpmoc_cmd_fp_mode (FpiDeviceCrfpMoc *self, guint32 inmode, guint32 *outmode, GError **error)
 {
   struct crfpmoc_ec_params_fp_mode p;
   struct crfpmoc_ec_response_fp_mode r;
   int rv;
 
   p.mode = inmode;
-  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_MODE, 0, &p, sizeof (p), &r, sizeof (r), error_msg);
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_MODE, 0, &p, sizeof (p), &r, sizeof (r), error);
   if (rv < 0)
     return rv;
 
@@ -203,12 +209,12 @@ crfpmoc_cmd_fp_mode (FpiDeviceCrfpMoc *self, guint32 inmode, guint32 *outmode, c
 }
 
 static int
-crfpmoc_cmd_fp_info (FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, const gchar **error_msg)
+crfpmoc_cmd_fp_info (FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, GError **error)
 {
   struct crfpmoc_ec_response_fp_info r;
   int rv;
 
-  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &r, sizeof (r), error_msg);
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &r, sizeof (r), error);
   if (rv < 0)
     return rv;
 
@@ -221,12 +227,12 @@ crfpmoc_cmd_fp_info (FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, const 
 }
 
 static int
-crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, const gchar **error_msg)
+crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, GError **error)
 {
   struct crfpmoc_ec_response_fp_stats r;
   int rv;
 
-  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_STATS, 0, NULL, 0, &r, sizeof (r), error_msg);
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_STATS, 0, NULL, 0, &r, sizeof (r), error);
   if (rv < 0)
     return rv;
 
@@ -355,14 +361,14 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
   int r;
   guint32 mode;
   guint16 enrolled_templates = 0;
-  const gchar *error_msg;
+  GError *error;
 
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case ENROLL_SENSOR_ENROLL:
-      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_ENROLL_IMAGE | CRFPMOC_FP_MODE_ENROLL_SESSION, &mode, &error_msg);
+      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_ENROLL_IMAGE | CRFPMOC_FP_MODE_ENROLL_SESSION, &mode, &error);
       if (r < 0)
-        fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
+        fpi_ssm_mark_failed (ssm, error);
       else
         fpi_ssm_next_state (ssm);
       break;
@@ -384,10 +390,10 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       break;
 
     case ENROLL_SENSOR_CHECK:
-      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error_msg);
+      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error);
       if (r < 0)
         {
-          fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
+          fpi_ssm_mark_failed (ssm, error);
         }
       else
         {
@@ -426,7 +432,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       break;
 
     case ENROLL_COMMIT:
-      crfpmoc_cmd_fp_info (self, &enrolled_templates, &error_msg);
+      crfpmoc_cmd_fp_info (self, &enrolled_templates, &error);
       fp_dbg ("Number of enrolled templates is: %d", enrolled_templates);
 
       user_id = fpi_print_generate_user_id (enroll_print->print);
@@ -472,14 +478,14 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   int r;
   guint32 mode;
   gint8 template = -1;
-  const gchar *error_msg;
+  GError *error;
 
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VERIFY_SENSOR_MATCH:
-      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_MATCH, &mode, &error_msg);
+      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_MATCH, &mode, &error);
       if (r < 0)
-        fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
+        fpi_ssm_mark_failed (ssm, error);
       else
         fpi_ssm_next_state (ssm);
       break;
@@ -501,10 +507,10 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
       break;
 
     case VERIFY_SENSOR_CHECK:
-      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error_msg);
+      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error);
       if (r < 0)
         {
-          fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
+          fpi_ssm_mark_failed (ssm, error);
         }
       else
         {
@@ -516,10 +522,10 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
             {
               fpi_device_report_finger_status (device, FP_FINGER_STATUS_PRESENT);
 
-              r = crfpmoc_cmd_fp_stats (self, &template, &error_msg);
+              r = crfpmoc_cmd_fp_stats (self, &template, &error);
               if (r < 0)
                 {
-                  fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
+                  fpi_ssm_mark_failed (ssm, error);
                 }
               else
                 {
@@ -609,15 +615,15 @@ crfpmoc_clear_storage_run_state (FpiSsm *ssm, FpDevice *device)
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   int r;
   guint32 mode;
-  const gchar *error_msg;
+  GError *error;
 
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case CLEAR_STORAGE_SENSOR_RESET:
-      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &error_msg);
+      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &error);
       if (r < 0)
         {
-          fpi_ssm_mark_failed (ssm, fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "%s", error_msg));
+          fpi_ssm_mark_failed (ssm, error);
         }
       else
         {
