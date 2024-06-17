@@ -112,13 +112,13 @@ crfpmoc_set_print_data (FpPrint *print, gint8 template)
 static int
 crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void *outdata, int outsize, void *indata, int insize, const gchar **error_msg)
 {
-  struct crfpmoc_cros_ec_command_v2 *s_cmd;
+  g_autofree struct crfpmoc_cros_ec_command_v2 *s_cmd = NULL;
   int r;
 
   g_assert (outsize == 0 || outdata != NULL);
   g_assert (insize == 0 || indata != NULL);
 
-  s_cmd = g_malloc (sizeof (struct crfpmoc_cros_ec_command_v2) + MAX (outsize, insize));
+  s_cmd = g_malloc0 (sizeof (struct crfpmoc_cros_ec_command_v2) + MAX (outsize, insize));
   if (s_cmd == NULL)
     {
       if (error_msg != NULL)
@@ -160,8 +160,6 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self, int command, int version, const void
 
   if (error_msg != NULL)
     *error_msg = crfpmoc_strresult (s_cmd->result);
-
-  g_free (s_cmd);
 
   return r;
 }
