@@ -74,9 +74,7 @@ static const gchar *const crfpmoc_meanings[] = {
 static const gchar *
 crfpmoc_strresult (int i)
 {
-  int crfpmoc_meanings_len = sizeof (crfpmoc_meanings) / sizeof (crfpmoc_meanings[0]);
-
-  if (i < 0 || i >= crfpmoc_meanings_len)
+  if (i < 0 || i >= G_N_ELEMENTS (crfpmoc_meanings))
     return "<unknown>";
   return crfpmoc_meanings[i];
 }
