@@ -235,6 +235,7 @@ fp_device_finalize (GObject *object)
   g_clear_pointer (&priv->virtual_env, g_free);
   g_clear_pointer (&priv->udev_data.spidev_path, g_free);
   g_clear_pointer (&priv->udev_data.hidraw_path, g_free);
+  g_clear_pointer (&priv->udev_data.misc_path, g_free);
 
   G_OBJECT_CLASS (fp_device_parent_class)->finalize (object);
 }
