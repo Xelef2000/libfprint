@@ -639,7 +639,7 @@ fpi_device_crfpmoc_class_init (FpiDeviceCrfpMocClass *klass)
   dev_class->scan_type = FP_SCAN_TYPE_PRESS;
   dev_class->id_table = crfpmoc_id_table;
   dev_class->nr_enroll_stages = CRFPMOC_NR_ENROLL_STAGES;
-  dev_class->temp_hot_seconds = 0;
+  dev_class->temp_hot_seconds = -1;
 
   dev_class->open = crfpmoc_open;
   dev_class->cancel = crfpmoc_cancel;
