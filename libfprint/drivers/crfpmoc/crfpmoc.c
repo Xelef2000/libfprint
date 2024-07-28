@@ -497,77 +497,71 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
             {
               fpi_device_report_finger_status (device, FP_FINGER_STATUS_PRESENT);
 
-              r = crfpmoc_cmd_fp_stats (self, &template, &error);
-              if (!r)
-                {
-                  fpi_ssm_mark_failed (ssm, error);
-                }
-              else
-                {
-                  gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
-                  if (template == -1)
-                    {
-                      fp_info ("Print was not identified by the device");
-
-                      if (is_identify)
-                        fpi_device_identify_report (device, NULL, NULL, NULL);
-                      else
-                        fpi_device_verify_report (device, FPI_MATCH_FAIL, NULL, NULL);
-                    }
-                  else
-                    {
-                      print = fp_print_new (device);
-                      crfpmoc_set_print_data (print, template);
-
-                      fp_info ("Identify successful for template %d", template);
-
-                      if (is_identify)
-                        {
-                          fpi_device_get_identify_data (device, &prints);
-                          found = g_ptr_array_find_with_equal_func (prints,
-                                                                    print,
-                                                                    (GEqualFunc) fp_print_equal,
-                                                                    &index);
-
-                          if (found)
-                            fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
-                          else
-                            fpi_device_identify_report (device, NULL, print, NULL);
-                        }
-                      else
-                        {
-                          fpi_device_get_verify_data (device, &verify_print);
-                          fp_info ("Verifying against: %s", fp_print_get_description (verify_print));
-
-                          if (fp_print_equal (verify_print, print))
-                            fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
-                          else
-                            fpi_device_verify_report (device, FPI_MATCH_FAIL, print, NULL);
-                        }
-                    }
-                  if (fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_VERIFY)
-                    fpi_device_verify_complete (device, NULL);
-                  else
-                    fpi_device_identify_complete (device, NULL);
-                  fpi_ssm_mark_completed (ssm);
-                }
+              fpi_ssm_next_state_delayed (ssm, 0);
             }
           else
             {
               fpi_device_report_finger_status (device, FP_FINGER_STATUS_PRESENT);
 
-              if (fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_VERIFY)
+              fpi_ssm_mark_failed (ssm, fpi_device_retry_new_msg (FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
+            }
+        }
+      break;
+
+    case VERIFY_CHECK:
+      r = crfpmoc_cmd_fp_stats (self, &template, &error);
+      if (!r)
+        {
+          fpi_ssm_mark_failed (ssm, error);
+        }
+      else
+        {
+          gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
+          if (template == -1)
+            {
+              fp_info ("Print was not identified by the device");
+
+              if (is_identify)
+                fpi_device_identify_report (device, NULL, NULL, NULL);
+              else
+                fpi_device_verify_report (device, FPI_MATCH_FAIL, NULL, NULL);
+            }
+          else
+            {
+              print = fp_print_new (device);
+              crfpmoc_set_print_data (print, template);
+
+              fp_info ("Identify successful for template %d", template);
+
+              if (is_identify)
                 {
-                  fpi_device_verify_report (device, FPI_MATCH_FAIL, NULL, fpi_device_retry_new_msg (FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
-                  fpi_device_verify_complete (device, NULL);
+                  fpi_device_get_identify_data (device, &prints);
+                  found = g_ptr_array_find_with_equal_func (prints,
+                                                            print,
+                                                            (GEqualFunc) fp_print_equal,
+                                                            &index);
+
+                  if (found)
+                    fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
+                  else
+                    fpi_device_identify_report (device, NULL, print, NULL);
                 }
               else
                 {
-                  fpi_device_identify_report (device, NULL, NULL, fpi_device_retry_new_msg (FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
-                  fpi_device_identify_complete (device, NULL);
+                  fpi_device_get_verify_data (device, &verify_print);
+                  fp_info ("Verifying against: %s", fp_print_get_description (verify_print));
+
+                  if (fp_print_equal (verify_print, print))
+                    fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
+                  else
+                    fpi_device_verify_report (device, FPI_MATCH_FAIL, print, NULL);
                 }
-              fpi_ssm_mark_completed (ssm);
             }
+          if (is_identify)
+            fpi_device_identify_complete (device, NULL);
+          else
+            fpi_device_verify_complete (device, NULL);
+          fpi_ssm_mark_completed (ssm);
         }
       break;
     }
