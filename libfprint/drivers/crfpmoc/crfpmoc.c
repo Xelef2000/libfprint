@@ -20,6 +20,7 @@
 
 #define FP_COMPONENT "crfpmoc"
 
+#include <glib-unix.h>
 #include <sys/fcntl.h>
 #include <sys/poll.h>
 
@@ -158,24 +159,46 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
   return TRUE;
 }
 
-static int
-crfpmoc_ec_pollevent (FpiDeviceCrfpMoc *self, unsigned long mask, void *buffer, size_t buf_size, int timeout)
+static gboolean
+crfpmoc_read_bytes (gint fd, GIOCondition condition, gpointer user_data)
+{
+  FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (user_data);
+  int rv;
+  struct crfpmoc_ec_response_get_next_event_v1 buffer = { 0 };
+
+  rv = read (fd, &buffer, sizeof (buffer));
+
+  if (rv == 0)
+    {
+      fp_warn ("Timeout waiting for MKBP event");
+      fpi_ssm_mark_failed (self->task_ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
+      return FALSE;
+    }
+  else if (rv < 0)
+    {
+      fp_warn ("Error polling for MKBP event");
+      fpi_ssm_mark_failed (self->task_ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
+      return FALSE;
+    }
+
+  fp_dbg ("MKBP event %d data", buffer.event_type);
+  fpi_ssm_next_state (self->task_ssm);
+  return FALSE;
+}
+
+static void
+crfpmoc_ec_pollevent (FpiDeviceCrfpMoc *self, unsigned long mask)
 {
   int rv;
-  struct pollfd pf = { .fd = self->fd, .events = POLLIN };
 
   rv = ioctl (self->fd, CRFPMOC_CROS_EC_DEV_IOCEVENTMASK_V2, mask);
   if (rv < 0)
-    return -rv;
+    {
+      fpi_ssm_next_state (self->task_ssm);
+      return;
+    }
 
-  rv = poll (&pf, 1, timeout);
-  if (rv != 1)
-    return rv;
-
-  if (pf.revents != POLLIN)
-    return -pf.revents;
-
-  return read (self->fd, buffer, buf_size);
+  g_unix_fd_add (self->fd, G_IO_IN, crfpmoc_read_bytes, self);
 }
 
 static gboolean
@@ -239,28 +262,12 @@ crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, GError **error)
   return TRUE;
 }
 
-static gboolean
+static void
 crfpmoc_cmd_wait_event_fingerprint (FpiDeviceCrfpMoc *self)
 {
-  int rv;
-  struct crfpmoc_ec_response_get_next_event_v1 buffer = { 0 };
-  int timeout = -1;
   long event_type = CRFPMOC_EC_MKBP_EVENT_FINGERPRINT;
 
-  rv = crfpmoc_ec_pollevent (self, 1 << event_type, &buffer, sizeof (buffer), timeout);
-  if (rv == 0)
-    {
-      fp_warn ("Timeout waiting for MKBP event");
-      return FALSE;
-    }
-  else if (rv < 0)
-    {
-      fp_warn ("Error polling for MKBP event");
-      return FALSE;
-    }
-
-  fp_dbg ("MKBP event %d data", buffer.event_type);
-  return TRUE;
+  crfpmoc_ec_pollevent (self, 1 << event_type);
 }
 
 static void
@@ -364,11 +371,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
 
     case ENROLL_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
-      r = crfpmoc_cmd_wait_event_fingerprint (self);
-      if (!r)
-        fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
-      else
-        fpi_ssm_next_state (ssm);
+      crfpmoc_cmd_wait_event_fingerprint (self);
       break;
 
     case ENROLL_SENSOR_CHECK:
@@ -474,11 +477,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 
     case VERIFY_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
-      r = crfpmoc_cmd_wait_event_fingerprint (self);
-      if (!r)
-        fpi_ssm_mark_failed (ssm, fpi_device_error_new (FP_DEVICE_ERROR_GENERAL));
-      else
-        fpi_ssm_next_state (ssm);
+      crfpmoc_cmd_wait_event_fingerprint (self);
       break;
 
     case VERIFY_SENSOR_CHECK:
@@ -497,7 +496,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
             {
               fpi_device_report_finger_status (device, FP_FINGER_STATUS_PRESENT);
 
-              fpi_ssm_next_state_delayed (ssm, 0);
+              fpi_ssm_next_state (ssm);
             }
           else
             {
