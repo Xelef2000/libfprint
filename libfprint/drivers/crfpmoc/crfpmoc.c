@@ -166,6 +166,9 @@ crfpmoc_read_bytes (gint fd, GIOCondition condition, gpointer user_data)
   int rv;
   struct crfpmoc_ec_response_get_next_event_v1 buffer = { 0 };
 
+  if (fd != self->fd)
+    return FALSE;
+
   rv = read (fd, &buffer, sizeof (buffer));
 
   if (rv == 0)
@@ -313,6 +316,9 @@ crfpmoc_cancel (FpDevice *device)
 {
   fp_dbg ("Cancel");
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
+
+  if (self->task_ssm != NULL)
+    fpi_ssm_mark_failed (self->task_ssm, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled"));
 
   crfpmoc_cmd_fp_mode (self, 0, NULL, NULL);
 
