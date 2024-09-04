@@ -15,11 +15,9 @@ if len(sys.argv) != 2:
 try:
     umockdev_version = subprocess.check_output(['umockdev-run', '--version'])
     version = tuple(int(_) for _ in umockdev_version.split(b'.')[:3])
-    if version < (0, 13, 2):
+    if version < (0, 18, 4):
         print('umockdev is too old for test to be reliable, expect random failures!')
-        print('Please update umockdev to at least 0.13.2.')
-    pcap_supported = version >= (0, 16, 3) or os.getenv('CI_PROJECT_NAME') == "libfprint"
-    spi_supported = version >= (0, 16) or os.getenv('CI_PROJECT_NAME') == "libfprint"
+        print('Please update umockdev to at least 0.18.4.')
 
 except FileNotFoundError:
     print('umockdev-run not found, skipping test!')
@@ -74,20 +72,12 @@ def get_umockdev_runner(ioctl_basename):
                     '-p', "%s=%s" % (syspath, pcap),
                     '--']
 
-        # Skip test if we detect too old umockdev for pcap replay
-        if not pcap_supported:
-            sys.exit(77)
-
     else:
         dev = open(ioctl).readline().strip()
         assert dev.startswith('@DEV ')
         dev = dev[5:]
         if dev.endswith(" (SPI)"):
             dev = dev[:dev.rindex(" ")]
-
-            # Skip test if we detect too old umockdev for spi replay
-            if not spi_supported:
-                sys.exit(77)
 
         umockdev = ['umockdev-run', *device_args,
                     '-i', "%s=%s" % (dev, ioctl),
