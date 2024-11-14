@@ -434,6 +434,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1);
 
       fp_info ("Enrollment was successful!");
+      fp_info ("Testing build setup");
       fpi_device_enroll_complete (device, g_object_ref (enroll_print->print), NULL);
 
       fpi_ssm_mark_completed (ssm);
