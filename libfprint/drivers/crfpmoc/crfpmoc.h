@@ -77,6 +77,46 @@ G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC,
 #define CRFPMOC_FP_CONTEXT_ENCRYPTION_SALT_BYTES 16
 #define CRFPMOC_FP_CONTEXT_TPM_BYTES 32
 
+#define CRFPMOC_EC_CMD_FP_FRAME 0x0404
+
+/* constants defining the 'offset' field which also contains the frame index */
+#define CRFPMOC_FP_FRAME_INDEX_SHIFT 28
+/* Frame buffer where the captured image is stored */
+#define CRFPMOC_FP_FRAME_INDEX_RAW_IMAGE 0
+/* First frame buffer holding a template */
+#define CRFPMOC_FP_FRAME_INDEX_TEMPLATE 1
+#define CRFPMOC_FP_FRAME_GET_BUFFER_INDEX(offset) ((offset) >> FP_FRAME_INDEX_SHIFT)
+#define CRFPMOC_FP_FRAME_OFFSET_MASK 0x0FFFFFFF
+
+
+struct crfpmoc_ec_params_fp_frame {
+	/*
+	 * The offset contains the template index or FP_FRAME_INDEX_RAW_IMAGE
+	 * in the high nibble, and the real offset within the frame in
+	 * FP_FRAME_OFFSET_MASK.
+	 */
+	guint32 offset;
+	guint32 size;
+} __attribute__((packed));
+
+#define CRFPMOC_EC_CMD_GET_PROTOCOL_INFO 0x000B
+struct crfpmoc_ec_response_get_protocol_info {
+	/* Fields which exist if at least protocol version 3 supported */
+	guint32 protocol_versions;
+	guint16 max_request_packet_size;
+	guint16 max_response_packet_size;
+	guint32 flags;
+} __attribute__((packed));
+
+struct crfpmoc_ec_host_response {
+	guint8 struct_version;
+	guint8 checksum;
+	guint16 result;
+	guint16 data_len;
+	guint16 reserved;
+} __attribute__((packed));
+
+
 
 struct crfpmoc_ec_params_fp_mode
 {

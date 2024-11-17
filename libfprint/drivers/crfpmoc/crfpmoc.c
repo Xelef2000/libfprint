@@ -295,6 +295,84 @@ crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, GError **error)
   return TRUE;
 }
 
+static gboolean
+crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, void *template_buffer, int template_buffer_size, GError **error)
+{
+  gboolean rv;
+
+  struct crfpmoc_ec_response_fp_info info;
+  struct crfpmoc_ec_response_get_protocol_info protocol_info;
+  struct crfpmoc_ec_params_fp_frame p;
+  guint8 *ptr;
+
+  const int max_attempts = 3;
+	int num_attempts;
+  size_t stride, size;
+  int ec_max_insize;
+  int template_idx = frame_idx + CRFPMOC_FP_FRAME_INDEX_TEMPLATE;
+
+
+  fp_dbg ("Downloading frame %d", template_idx);
+
+  rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_GET_PROTOCOL_INFO, 0, NULL, 0, &protocol_info, sizeof(protocol_info), error);
+  if (!rv)
+    return rv;
+  
+  ec_max_insize = protocol_info.max_response_packet_size - sizeof(struct crfpmoc_ec_host_response);
+
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &info, sizeof (info), error);
+  if (!rv)
+    return rv;
+
+  fp_dbg ("Fingerprint sensor: vendor %x product %x model %x version %x template size %x", info.vendor_id, info.product_id, info.model_id, info.version, info.template_size);
+
+  if(template_idx < 0 || template_idx >= info.template_max)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Frame index should be between 0 and %d", info.template_max);
+    return FALSE;
+  }
+
+  size = info.template_size;
+
+  if(template_buffer_size != size)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Template buffer size should be %ld", size);
+    return FALSE;
+  }
+
+  ptr = (guint8 *)(template_buffer);
+  p.offset = template_idx << CRFPMOC_FP_FRAME_INDEX_SHIFT;
+
+  while (size) {
+		stride = MIN(ec_max_insize, size);
+		p.size = stride;
+		num_attempts = 0;
+		while (num_attempts < max_attempts) {
+			num_attempts++;
+			
+      rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_FRAME, 0, &p, sizeof (p), ptr, stride, error);
+     
+      if(!rv)
+        break;
+      
+
+			usleep(100000);
+		}
+
+		// if (!rv) {
+    //   memset(template_buffer, 0, template_buffer_size);
+		// 	g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to download frame");
+		// 	return FALSE;
+		// }
+
+		p.offset += stride;
+		size -= stride;
+		ptr += stride;
+	}
+
+  return TRUE;
+}
+
 static void
 crfpmoc_cmd_wait_event_fingerprint (FpiDeviceCrfpMoc *self)
 {
@@ -340,7 +418,7 @@ crfpmoc_open (FpDevice *device)
   self->fd = fd;
 
   // setting very secure seed
-  crfpmoc_cmd_fp_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
+  // crfpmoc_cmd_fp_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
 
   fpi_device_open_complete (device, NULL);
 }
@@ -465,6 +543,17 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
 
       user_id = fpi_print_generate_user_id (enroll_print->print);
       fp_dbg ("New fingerprint ID: %s", user_id);
+
+
+      // struct crfpmoc_ec_response_fp_info info;
+      // crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &info, sizeof (info), &error);
+      // char *buffer = g_malloc0 (info.template_size);
+      // crfpmoc_cmd_fp_download_frame (self, enrolled_templates-1, buffer, info.template_size, &error);
+      // fp_dbg ("Buffer: %s", buffer);
+      
+      // g_free(buffer);
+      
+
 
       g_object_set (enroll_print->print, "description", user_id, NULL);
 

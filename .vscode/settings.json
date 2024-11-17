@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "fcntl.h": "c",
+        "drivers_api.h": "c",
+        "compare": "cpp"
     }
 }
