@@ -95,6 +95,9 @@ get_print_data_descriptor (FpPrint *print, gint8 template)
 static void
 crfpmoc_set_print_data (FpPrint *print, gint8 template)
 {
+
+  fp_dbg ("Setting print data");
+
   g_autofree gchar *descr = NULL;
   GVariant *print_id_var = NULL;
   GVariant *fpi_data = NULL;
@@ -224,6 +227,33 @@ crfpmoc_cmd_fp_mode (FpiDeviceCrfpMoc *self, guint32 inmode, guint32 *outmode, G
 }
 
 static gboolean
+crfpmoc_cmd_fp_seed (FpiDeviceCrfpMoc *self,const char* seed, GError **error)
+{
+  struct crfpmoc_ec_params_fp_seed p;
+  gboolean rv;
+
+  fp_dbg ("Setting seed '%s'", seed);
+
+  if(strlen(seed) != CRFPMOC_FP_CONTEXT_TPM_BYTES)
+  {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Seed length should be %d", CRFPMOC_FP_CONTEXT_TPM_BYTES);
+      return FALSE;
+  }
+
+
+  p.struct_version = CRFPMOC_FP_TEMPLATE_FORMAT_VERSION;
+  memset(p.seed, 0, CRFPMOC_FP_CONTEXT_TPM_BYTES);
+  memcpy(p.seed, seed, CRFPMOC_FP_CONTEXT_TPM_BYTES);
+
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_SEED, 0, &p, sizeof (p), NULL, 0, error);
+
+  if (!rv)
+    return rv;
+
+  return TRUE;
+}
+
+static gboolean
 crfpmoc_cmd_fp_info (FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, GError **error)
 {
   struct crfpmoc_ec_response_fp_info r;
@@ -299,6 +329,7 @@ crfpmoc_open (FpDevice *device)
 
   int fd = open (file, O_RDWR);
 
+
   if (fd < 0)
     {
       g_set_error (&err, G_IO_ERROR, g_io_error_from_errno (errno), "unable to open misc device");
@@ -307,6 +338,9 @@ crfpmoc_open (FpDevice *device)
     }
 
   self->fd = fd;
+
+  // setting very secure seed
+  crfpmoc_cmd_fp_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
 
   fpi_device_open_complete (device, NULL);
 }
@@ -360,6 +394,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   EnrollPrint *enroll_print = fpi_ssm_get_data (ssm);
   g_autofree gchar *user_id = NULL;
+  g_autofree gchar *device_print_id = NULL;
   gboolean r;
   guint32 mode;
   guint16 enrolled_templates = 0;
@@ -426,6 +461,8 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       crfpmoc_cmd_fp_info (self, &enrolled_templates, &error);
       fp_dbg ("Number of enrolled templates is: %d", enrolled_templates);
 
+      // device_print_id = g_strndup (user_id, EGISMOC_FINGERPRINT_DATA_SIZE);
+
       user_id = fpi_print_generate_user_id (enroll_print->print);
       fp_dbg ("New fingerprint ID: %s", user_id);
 
@@ -434,7 +471,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1);
 
       fp_info ("Enrollment was successful!");
-      fp_info ("Testing build setup");
+
       fpi_device_enroll_complete (device, g_object_ref (enroll_print->print), NULL);
 
       fpi_ssm_mark_completed (ssm);

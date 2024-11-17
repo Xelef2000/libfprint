@@ -47,7 +47,7 @@
               src = pkgs.fetchFromGitHub {
               owner = "Xelef2000";
               repo = "libfprint";
-              rev = "56dc7f7524dabc0da55f2a15f7706e73778aa5e7";
+              rev = "05bd17f8eb3cd25e367c67f153d93d3a3bc61c52";
               hash = "sha256-ySifkClM6qjDlm8iPMwWngHs5PrB1reddreziIUEs5k=";
             };
             }))

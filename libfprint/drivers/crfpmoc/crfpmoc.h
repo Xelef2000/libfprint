@@ -33,6 +33,7 @@
 
 G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC, FpDevice)
 
+
 #define CRFPMOC_DRIVER_FULLNAME "ChromeOS Fingerprint Match-on-Chip"
 
 #define CRFPMOC_NR_ENROLL_STAGES 5
@@ -46,6 +47,7 @@ G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC,
 #define CRFPMOC_EC_CMD_FP_MODE 0x0402
 #define CRFPMOC_EC_CMD_FP_INFO 0x0403
 #define CRFPMOC_EC_CMD_FP_STATS 0x0407
+#define CRFPMOC_EC_CMD_FP_SEED 0x0408
 
 /* Finger enrollment session on-going */
 #define CRFPMOC_FP_MODE_ENROLL_SESSION (1U << 4)
@@ -60,8 +62,21 @@ G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC,
 
 #define CRFPMOC_FPSTATS_MATCHING_INV (1U << 1)
 
+
+
 /* New Fingerprint sensor event, the event data is fp_events bitmap. */
 #define CRFPMOC_EC_MKBP_EVENT_FINGERPRINT 5
+
+/* Version of the format of the encrypted templates. */
+#define CRFPMOC_FP_TEMPLATE_FORMAT_VERSION 4
+
+/* Constants for encryption parameters */
+#define CRFPMOC_FP_CONTEXT_NONCE_BYTES 12
+#define CRFPMOC_FP_CONTEXT_USERID_WORDS (32 / sizeof(guint32))
+#define CRFPMOC_FP_CONTEXT_TAG_BYTES 16
+#define CRFPMOC_FP_CONTEXT_ENCRYPTION_SALT_BYTES 16
+#define CRFPMOC_FP_CONTEXT_TPM_BYTES 32
+
 
 struct crfpmoc_ec_params_fp_mode
 {
@@ -86,6 +101,18 @@ struct crfpmoc_ec_response_fp_stats
   guint8 timestamps_invalid;
   gint8  template_matched;
 } __attribute__((packed));
+
+struct crfpmoc_ec_params_fp_seed {
+	/*
+	 * Version of the structure format (N=3).
+	 */
+	guint16 struct_version;
+	/* Reserved bytes, set to 0. */
+	guint16 reserved;
+	/* Seed from the TPM. */
+	guint8 seed[CRFPMOC_FP_CONTEXT_TPM_BYTES];
+} __attribute__((packed));
+
 
 struct crfpmoc_ec_response_fp_info
 {
