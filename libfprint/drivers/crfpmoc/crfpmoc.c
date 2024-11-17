@@ -418,7 +418,7 @@ crfpmoc_open (FpDevice *device)
   self->fd = fd;
 
   // setting very secure seed
-  // crfpmoc_cmd_fp_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
+  crfpmoc_cmd_fp_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
 
   fpi_device_open_complete (device, NULL);
 }
