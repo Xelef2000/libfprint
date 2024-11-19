@@ -333,7 +333,9 @@ crfmoc_cmd_fp_enshure_seed (FpiDeviceCrfpMoc *self, const char* seed, GError **e
 
   fp_dbg("FPMCU encryption status: %d", status);
 
-  if(status != CRFPMOC_FP_ENC_STATUS_SEED_SET)
+  // I don't know why the encryption status is 5 after using verify. Since it should be 1. It also returns to 1 after using enroll
+  // I am going to assume that 5 means that the seed is set, since setting the seed twice locks the device
+  if(status == 0)
   {
     fp_dbg("Seed is not set, setting seed");
     rv = crfpmoc_cmd_fp_seed (self, seed, error);
