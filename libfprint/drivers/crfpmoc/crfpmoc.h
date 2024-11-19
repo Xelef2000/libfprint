@@ -116,6 +116,17 @@ struct crfpmoc_ec_host_response {
 	guint16 reserved;
 } __attribute__((packed));
 
+#define CRFPMOC_EC_CMD_FP_ENC_STATUS 0x0409
+
+/* FP TPM seed has been set or not */
+#define CRFPMOC_FP_ENC_STATUS_SEED_SET (1U << 0)
+
+struct crfpmoc_ec_response_fp_encryption_status {
+	/* Used bits in encryption engine status */
+	guint32 valid_flags;
+	/* Encryption engine status */
+	guint32 status;
+} __attribute__((packed));
 
 
 struct crfpmoc_ec_params_fp_mode

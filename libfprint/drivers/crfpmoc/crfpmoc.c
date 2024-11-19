@@ -296,6 +296,55 @@ crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, GError **error)
 }
 
 static gboolean
+crfpmoc_cmd_fp_enc_status (FpiDeviceCrfpMoc *self, guint32 *status, GError **error)
+{
+	struct crfpmoc_ec_response_fp_encryption_status resp = { 0 };
+  gboolean rv;
+
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_ENC_STATUS, 0, NULL, 0, &resp, sizeof (resp), error);
+  if (!rv)
+    return rv;
+
+  fp_dbg("FPMCU encryption status: %d", resp.status);
+	fp_dbg("Valid flags: %d", resp.valid_flags);
+
+  if(resp.status == CRFPMOC_FP_ENC_STATUS_SEED_SET) {
+    fp_dbg("Seed is set");
+  }
+
+  if(status == NULL)
+    return FALSE;
+
+  *status = resp.status;
+
+  return TRUE;
+}
+
+static gboolean
+crfmoc_cmd_fp_enshure_seed (FpiDeviceCrfpMoc *self, const char* seed, GError **error)
+{
+  guint32 status;
+  gboolean rv;
+
+  fp_dbg("Checking if seed is set");
+  rv = crfpmoc_cmd_fp_enc_status (self, &status, error);
+  if (!rv)
+    return rv;
+
+  fp_dbg("FPMCU encryption status: %d", status);
+
+  if(status != CRFPMOC_FP_ENC_STATUS_SEED_SET)
+  {
+    fp_dbg("Seed is not set, setting seed");
+    rv = crfpmoc_cmd_fp_seed (self, seed, error);
+    if (!rv)
+      return rv;
+  }
+
+  return TRUE;
+}
+
+static gboolean
 crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, void *template_buffer, int template_buffer_size, GError **error)
 {
   gboolean rv;
@@ -417,11 +466,13 @@ crfpmoc_open (FpDevice *device)
 
   self->fd = fd;
 
-  // setting very secure seed
-  crfpmoc_cmd_fp_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
+
 
   fpi_device_open_complete (device, NULL);
 }
+
+
+
 
 static void
 crfpmoc_cancel (FpDevice *device)
@@ -486,7 +537,17 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
         fpi_ssm_mark_failed (ssm, error);
       else
         fpi_ssm_next_state (ssm);
+
+      // I am not sure if this is the correct location to set the seed
+      // the rust-fp only sets the seed when during a enroll or match operation
+      r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
+      
+      if (!r)
+        fpi_ssm_mark_failed (ssm, error);
+
+
       break;
+
 
     case ENROLL_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
@@ -598,6 +659,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   gint8 template = -1;
   GError *error;
 
+
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VERIFY_SENSOR_MATCH:
@@ -606,6 +668,11 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         fpi_ssm_mark_failed (ssm, error);
       else
         fpi_ssm_next_state (ssm);
+
+      r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
+      if(!r)
+        fpi_ssm_mark_failed (ssm, error);
+
       break;
 
     case VERIFY_WAIT_FINGER:
