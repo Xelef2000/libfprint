@@ -346,95 +346,7 @@ crfmoc_cmd_fp_enshure_seed (FpiDeviceCrfpMoc *self, const char* seed, GError **e
   return TRUE;
 }
 
-static gboolean
-crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, void *template_buffer, int template_buffer_size, GError **error)
-{
-  gboolean rv;
 
-  struct crfpmoc_ec_response_fp_info info;
-  struct crfpmoc_ec_response_get_protocol_info protocol_info;
-  struct crfpmoc_ec_params_fp_frame p;
-  guint8 *ptr;
-
-  const int max_attempts = 3;
-	int num_attempts;
-  size_t stride, size;
-  int ec_max_insize;
-  int template_idx = frame_idx + CRFPMOC_FP_FRAME_INDEX_TEMPLATE;
-  
-  usleep(100000);
-
-
-  fp_dbg ("Downloading frame %d", template_idx);
-
-  rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_GET_PROTOCOL_INFO, 0, NULL, 0, &protocol_info, sizeof(protocol_info), error);
-  if (!rv)
-    return rv;
-
-
-
-  			
-  usleep(100000);
-
-  
-  ec_max_insize = protocol_info.max_response_packet_size - sizeof(struct crfpmoc_ec_host_response);
-
-  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &info, sizeof (info), error);
-  if (!rv)
-    return rv;
-
-  fp_dbg ("Fingerprint sensor: vendor %x product %x model %x version %x template size %x", info.vendor_id, info.product_id, info.model_id, info.version, info.template_size);
-
-  if(template_idx < 0 || template_idx >= info.template_max)
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Frame index should be between 0 and %d", info.template_max);
-    return FALSE;
-  }
-
-  size = info.template_size;
-
-  if(template_buffer_size != size)
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Template buffer size should be %ld", size);
-    return FALSE;
-  }
-
-  ptr = (guint8 *)(template_buffer);
-  p.offset = template_idx << CRFPMOC_FP_FRAME_INDEX_SHIFT;
-
-  usleep(100000);
-
-  guint32 status;
-  rv = crfpmoc_cmd_fp_enc_status (self, &status, error);
-  
-  fp_dbg("FPMCU encryption status: %d", status);
-
-
-  while (size) {
-		stride = MIN(ec_max_insize, size);
-		p.size = stride;
-		num_attempts = 0;
-		while (num_attempts < max_attempts) {
-			num_attempts++;
-			
-      rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_FRAME, 0, &p, sizeof (p), ptr, stride, error);
-     
-      if(!rv)
-        break;
-      
-
-			usleep(100000);
-		}
-
-		fp_dbg (*error ? "Failed to download frame %d: %s" : "Downloaded frame %d", template_idx, *error ? (*error)->message : "");
-
-		p.offset += stride;
-		size -= stride;
-		ptr += stride;
-	}
-
-  return TRUE;
-}
 
 static gboolean
 crfpmoc_ec_max_insize(FpiDeviceCrfpMoc *self, guint32 *max_insize, GError **error)
@@ -451,10 +363,11 @@ crfpmoc_ec_max_insize(FpiDeviceCrfpMoc *self, guint32 *max_insize, GError **erro
   return TRUE;
 }
 
-static gpointer
-crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self, 
-                           struct crfpmoc_ec_response_fp_info *info, 
-                           gint index, 
+static gboolean
+crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
+                           struct crfpmoc_ec_response_fp_info *info,
+                           gint index,
+                           guint8 **out_buffer,
                            GError **error)
 {
   struct crfpmoc_ec_params_fp_frame p;
@@ -466,40 +379,34 @@ crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
   const gint max_attempts = 3;
   gint num_attempts;
   guint32 ec_max_insize;
+  gint template_idx = index + CRFPMOC_FP_FRAME_INDEX_TEMPLATE;
 
+  *out_buffer = NULL;
 
-  // rv = crfpmoc_ec_max_insize(self, &ec_max_insize, error);
-  // if (!rv) {
-  //   return NULL;
-  // }
-  ec_max_insize = 536;
-  usleep(100000);
+  rv = crfpmoc_ec_max_insize(self, &ec_max_insize, error);
+  if (!rv) {
+    return FALSE;
+  }
+  usleep(10000);
 
-
-
-  // Get sensor info
   rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_FP_INFO, cmdver, NULL, 0, info, rsize, error);
   if (!rv) {
-    return NULL;
+    return FALSE;
   }
 
-
   size = info->template_size;
-  
 
-  // Allocate buffer
   buffer = g_malloc0(size);
   if (!buffer) {
     g_set_error(error,
                 G_IO_ERROR,
                 G_DBUS_ERROR_NO_MEMORY,
                 "Failed to allocate memory for the image buffer.");
-    return NULL;
+    return FALSE;
   }
 
-  // Download the frame in chunks
   ptr = buffer;
-  p.offset = index << CRFPMOC_FP_FRAME_INDEX_SHIFT;
+  p.offset = template_idx << CRFPMOC_FP_FRAME_INDEX_SHIFT;
   while (size > 0) {
     stride = MIN(ec_max_insize, size);
     p.size = stride;
@@ -511,17 +418,16 @@ crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
       if (rv) {
         break; // Success
       }
-      // if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
-      //   // Access denied, stop retrying
-      //   fp_dbg("Access denied, stopping retrying");
-      //   break;
-      // }
-      usleep(100000); // Wait before retry
+      if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
+        fp_dbg("Access denied, stopping retrying");
+        break;
+      }
+      usleep(100000);
     }
 
     if (!rv) {
       g_free(buffer);
-      return NULL;
+      return FALSE;
     }
 
     p.offset += stride;
@@ -529,7 +435,8 @@ crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
     ptr += stride;
   }
 
-  return buffer;
+  *out_buffer = buffer;
+  return TRUE;
 }
 
 
@@ -726,16 +633,15 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       
       // g_free(buffer);
 
-                    GError *serror = NULL;
+              GError *serror = NULL;
               struct crfpmoc_ec_response_fp_info info;
-              gpointer frame = crfpmoc_fp_download_frame(self, &info, enrolled_templates, &serror);
+              guint8 *frame = NULL;
+              crfpmoc_fp_download_frame(self, &info, enrolled_templates-1, &frame ,&serror);
 
               if (!frame) {
                 g_warning("Failed to download frame: %s", serror->message);
                 g_clear_error(&serror);
               } else {
-                // Process frame
-                // Print the frame as hex
                 for (int i = 0; i < info.template_size; i++) {
                   printf("%02x", ((guint8 *)frame)[i]);
                 }
