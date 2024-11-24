@@ -3,7 +3,10 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "/nix/store/ipqijizc7rqsxifxc6ky16hr5l0hpls2-glib-2.82.1/lib",
+                "/nix/store/1hhi03gg5jdb2fa5gb9ncklziczax741-glib-2.82.1-dev/include/glib-2.0",
+                "/nix/store/ipqijizc7rqsxifxc6ky16hr5l0hpls2-glib-2.82.1/lib/glib-2.0/include"
             ],
             "defines": [],
             "compilerPath": "/run/current-system/sw/bin/clang",

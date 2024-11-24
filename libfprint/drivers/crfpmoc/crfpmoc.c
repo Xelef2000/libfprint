@@ -361,6 +361,8 @@ crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, 
   size_t stride, size;
   int ec_max_insize;
   int template_idx = frame_idx + CRFPMOC_FP_FRAME_INDEX_TEMPLATE;
+  
+  usleep(100000);
 
 
   fp_dbg ("Downloading frame %d", template_idx);
@@ -368,6 +370,12 @@ crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, 
   rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_GET_PROTOCOL_INFO, 0, NULL, 0, &protocol_info, sizeof(protocol_info), error);
   if (!rv)
     return rv;
+
+
+
+  			
+  usleep(100000);
+
   
   ec_max_insize = protocol_info.max_response_packet_size - sizeof(struct crfpmoc_ec_host_response);
 
@@ -394,6 +402,14 @@ crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, 
   ptr = (guint8 *)(template_buffer);
   p.offset = template_idx << CRFPMOC_FP_FRAME_INDEX_SHIFT;
 
+  usleep(100000);
+
+  guint32 status;
+  rv = crfpmoc_cmd_fp_enc_status (self, &status, error);
+  
+  fp_dbg("FPMCU encryption status: %d", status);
+
+
   while (size) {
 		stride = MIN(ec_max_insize, size);
 		p.size = stride;
@@ -410,11 +426,7 @@ crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, 
 			usleep(100000);
 		}
 
-		// if (!rv) {
-    //   memset(template_buffer, 0, template_buffer_size);
-		// 	g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to download frame");
-		// 	return FALSE;
-		// }
+		fp_dbg (*error ? "Failed to download frame %d: %s" : "Downloaded frame %d", template_idx, *error ? (*error)->message : "");
 
 		p.offset += stride;
 		size -= stride;
@@ -423,6 +435,103 @@ crfpmoc_cmd_fp_download_frame (FpiDeviceCrfpMoc *self, const guint16 frame_idx, 
 
   return TRUE;
 }
+
+static gboolean
+crfpmoc_ec_max_insize(FpiDeviceCrfpMoc *self, guint32 *max_insize, GError **error)
+{
+  struct crfpmoc_ec_response_get_protocol_info protocol_info;
+  gboolean rv;
+
+  rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_GET_PROTOCOL_INFO, 0, NULL, 0, &protocol_info, sizeof(protocol_info), error);
+  if (!rv)
+    return rv;
+
+  *max_insize = protocol_info.max_response_packet_size - sizeof(struct crfpmoc_ec_host_response);
+
+  return TRUE;
+}
+
+static gpointer
+crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self, 
+                           struct crfpmoc_ec_response_fp_info *info, 
+                           gint index, 
+                           GError **error)
+{
+  struct crfpmoc_ec_params_fp_frame p;
+  gsize stride, size;
+  guint8 *buffer = NULL, *ptr;
+  gboolean rv;
+  gint cmdver = 1;
+  gsize rsize = sizeof(*info);
+  const gint max_attempts = 3;
+  gint num_attempts;
+  guint32 ec_max_insize;
+
+
+  // rv = crfpmoc_ec_max_insize(self, &ec_max_insize, error);
+  // if (!rv) {
+  //   return NULL;
+  // }
+  ec_max_insize = 536;
+  usleep(100000);
+
+
+
+  // Get sensor info
+  rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_FP_INFO, cmdver, NULL, 0, info, rsize, error);
+  if (!rv) {
+    return NULL;
+  }
+
+
+  size = info->template_size;
+  
+
+  // Allocate buffer
+  buffer = g_malloc0(size);
+  if (!buffer) {
+    g_set_error(error,
+                G_IO_ERROR,
+                G_DBUS_ERROR_NO_MEMORY,
+                "Failed to allocate memory for the image buffer.");
+    return NULL;
+  }
+
+  // Download the frame in chunks
+  ptr = buffer;
+  p.offset = index << CRFPMOC_FP_FRAME_INDEX_SHIFT;
+  while (size > 0) {
+    stride = MIN(ec_max_insize, size);
+    p.size = stride;
+    num_attempts = 0;
+
+    while (num_attempts < max_attempts) {
+      num_attempts++;
+      rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_FP_FRAME, 0, &p, sizeof(p), ptr, stride, error);
+      if (rv) {
+        break; // Success
+      }
+      // if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
+      //   // Access denied, stop retrying
+      //   fp_dbg("Access denied, stopping retrying");
+      //   break;
+      // }
+      usleep(100000); // Wait before retry
+    }
+
+    if (!rv) {
+      g_free(buffer);
+      return NULL;
+    }
+
+    p.offset += stride;
+    size -= stride;
+    ptr += stride;
+  }
+
+  return buffer;
+}
+
 
 static void
 crfpmoc_cmd_wait_event_fingerprint (FpiDeviceCrfpMoc *self)
@@ -546,6 +655,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       
       if (!r)
         fpi_ssm_mark_failed (ssm, error);
+        
 
 
       break;
@@ -615,6 +725,22 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       // fp_dbg ("Buffer: %s", buffer);
       
       // g_free(buffer);
+
+                    GError *serror = NULL;
+              struct crfpmoc_ec_response_fp_info info;
+              gpointer frame = crfpmoc_fp_download_frame(self, &info, enrolled_templates, &serror);
+
+              if (!frame) {
+                g_warning("Failed to download frame: %s", serror->message);
+                g_clear_error(&serror);
+              } else {
+                // Process frame
+                // Print the frame as hex
+                for (int i = 0; i < info.template_size; i++) {
+                  printf("%02x", ((guint8 *)frame)[i]);
+                }
+                g_free(frame);
+              }
       
 
 
@@ -731,7 +857,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
             {
               print = fp_print_new (device);
               crfpmoc_set_print_data (print, template);
-
+              
               fp_info ("Identify successful for template %d", template);
 
               if (is_identify)
