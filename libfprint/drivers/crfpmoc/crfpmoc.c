@@ -636,9 +636,10 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
               GError *serror = NULL;
               struct crfpmoc_ec_response_fp_info info;
               guint8 *frame = NULL;
-              crfpmoc_fp_download_frame(self, &info, enrolled_templates-1, &frame ,&serror);
 
-              if (!frame) {
+              gboolean res = crfpmoc_fp_download_frame(self, &info, enrolled_templates-1, &frame ,&serror);
+
+              if (!res) {
                 g_warning("Failed to download frame: %s", serror->message);
                 g_clear_error(&serror);
               } else {
