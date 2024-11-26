@@ -41,6 +41,7 @@
             gtk-doc
             gdb
             valgrind
+            (pkgs.callPackage ./cros-ectool.nix { })
 
             # Add libfprint with an override
             (pkgs.libfprint.overrideAttrs (oldAttrs: {
