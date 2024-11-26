@@ -556,8 +556,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       else
         fpi_ssm_next_state (ssm);
 
-      // I am not sure if this is the correct location to set the seed
-      // the rust-fp only sets the seed when during a enroll or match operation
+      // TODO: move to dedicated state
       r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
       
       if (!r)
@@ -619,19 +618,11 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       crfpmoc_cmd_fp_info (self, &enrolled_templates, &error);
       fp_dbg ("Number of enrolled templates is: %d", enrolled_templates);
 
-      // device_print_id = g_strndup (user_id, EGISMOC_FINGERPRINT_DATA_SIZE);
 
       user_id = fpi_print_generate_user_id (enroll_print->print);
       fp_dbg ("New fingerprint ID: %s", user_id);
 
 
-      // struct crfpmoc_ec_response_fp_info info;
-      // crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &info, sizeof (info), &error);
-      // char *buffer = g_malloc0 (info.template_size);
-      // crfpmoc_cmd_fp_download_frame (self, enrolled_templates-1, buffer, info.template_size, &error);
-      // fp_dbg ("Buffer: %s", buffer);
-      
-      // g_free(buffer);
 
               GError *serror = NULL;
               struct crfpmoc_ec_response_fp_info info;
@@ -704,6 +695,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
       else
         fpi_ssm_next_state (ssm);
 
+      // TODO: Move to dedicated state
       r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
       if(!r)
         fpi_ssm_mark_failed (ssm, error);
