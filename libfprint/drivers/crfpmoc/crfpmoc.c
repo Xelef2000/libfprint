@@ -93,7 +93,8 @@ get_print_data_descriptor (FpPrint *print, gint8 template)
 }
 
 static void
-crfpmoc_set_print_data (FpPrint *print, gint8 template)
+crfpmoc_set_print_data (FpPrint *print, gint8 template, guint8 *frame, size_t frame_size)
+
 {
 
   fp_dbg ("Setting print data");
@@ -101,14 +102,29 @@ crfpmoc_set_print_data (FpPrint *print, gint8 template)
   g_autofree gchar *descr = NULL;
   GVariant *print_id_var = NULL;
   GVariant *fpi_data = NULL;
+  GVariant *frame_var = NULL;
 
   fpi_print_set_type (print, FPI_PRINT_RAW);
-  fpi_print_set_device_stored (print, TRUE);
+  // fpi_print_set_device_stored (print, TRUE);
 
   descr = get_print_data_descriptor (print, template);
   print_id_var = g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, descr, strlen (descr), sizeof (guchar));
-  fpi_data = g_variant_new ("(@ay)", print_id_var);
+
+
+  if(frame == NULL)
+  {
+    fpi_data = g_variant_new ("(@ay)", print_id_var);
+    g_object_set (print, "fpi-data", fpi_data, NULL);
+    return;
+  }
+
+  
+
+  frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, frame,frame_size, sizeof(guint8));
+
+  fpi_data = g_variant_new("(@ay@ay)", print_id_var, frame_var);
   g_object_set (print, "fpi-data", fpi_data, NULL);
+
 }
 
 static gboolean
@@ -547,6 +563,12 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
   guint16 enrolled_templates = 0;
   GError *error;
 
+  GError *serror = NULL;
+  struct crfpmoc_ec_response_fp_info info;
+  guint8 *frame = NULL;
+  gboolean res;
+
+
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case ENROLL_SENSOR_ENROLL:
@@ -555,15 +577,15 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
         fpi_ssm_mark_failed (ssm, error);
       else
         fpi_ssm_next_state (ssm);
+       
+      break;
 
-      // TODO: move to dedicated state
+    case ENROLL_ENSHURE_SEED:
       r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
-      
       if (!r)
         fpi_ssm_mark_failed (ssm, error);
-        
-
-
+      else
+        fpi_ssm_next_state (ssm);
       break;
 
 
@@ -624,27 +646,25 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
 
 
 
-              GError *serror = NULL;
-              struct crfpmoc_ec_response_fp_info info;
-              guint8 *frame = NULL;
-
-              gboolean res = crfpmoc_fp_download_frame(self, &info, enrolled_templates-1, &frame ,&serror);
-
-              if (!res) {
-                g_warning("Failed to download frame: %s", serror->message);
-                g_clear_error(&serror);
-              } else {
-                for (int i = 0; i < info.template_size; i++) {
-                  printf("%02x", ((guint8 *)frame)[i]);
-                }
-                g_free(frame);
-              }
-      
-
-
       g_object_set (enroll_print->print, "description", user_id, NULL);
 
-      crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1);
+
+
+      res = crfpmoc_fp_download_frame(self, &info,  enrolled_templates - 1, &frame ,&serror);
+
+      if (!res) {
+        g_warning("Failed to download frame: %s", serror->message);
+        g_clear_error(&serror);
+        crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1, NULL, 0);
+
+      } else {
+        crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1, frame, info.template_size);
+      }
+
+      g_free(frame);
+
+
+      
 
       fp_info ("Enrollment was successful!");
 
@@ -755,8 +775,8 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
           else
             {
               print = fp_print_new (device);
-              crfpmoc_set_print_data (print, template);
-              
+              crfpmoc_set_print_data (print, template, NULL, 0);
+
               fp_info ("Identify successful for template %d", template);
 
               if (is_identify)
