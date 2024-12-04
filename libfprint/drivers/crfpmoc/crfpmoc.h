@@ -297,7 +297,6 @@ enum crfpmoc_ec_status {
 
 typedef enum {
   ENROLL_SENSOR_ENROLL,
-  ENROLL_ENSHURE_SEED,
   ENROLL_WAIT_FINGER,
   ENROLL_SENSOR_CHECK,
   ENROLL_COMMIT,

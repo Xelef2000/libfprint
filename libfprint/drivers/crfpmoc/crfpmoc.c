@@ -108,24 +108,137 @@ crfpmoc_set_print_data (FpPrint *print, gint8 template, guint8 *frame, size_t fr
   // fpi_print_set_device_stored (print, TRUE);
 
   descr = get_print_data_descriptor (print, template);
+
   print_id_var = g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, descr, strlen (descr), sizeof (guchar));
 
 
-  if(frame == NULL)
+
+
+  if (frame == NULL || frame_size == 0)
   {
-    fpi_data = g_variant_new ("(@ay)", print_id_var);
-    g_object_set (print, "fpi-data", fpi_data, NULL);
-    return;
+    frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, NULL, 0, sizeof(guint8)); // Empty array
+    
+  } else {
+      frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, frame,frame_size, sizeof(guint8));
   }
 
   
 
-  frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, frame,frame_size, sizeof(guint8));
 
   fpi_data = g_variant_new("(@ay@ay)", print_id_var, frame_var);
   g_object_set (print, "fpi-data", fpi_data, NULL);
 
 }
+
+// required since the downloaded frame data is encrypted and 2 downloads are not the same
+// so a compare function, that ignores frame_var is required and only compares on the print_id_var
+gboolean
+crfpmoc_print_equal (FpPrint *self, FpPrint *other)
+{
+
+
+  g_return_val_if_fail(self != NULL, FALSE);
+  g_return_val_if_fail(other != NULL, FALSE);
+
+  GVariant *data1 = NULL;
+  GVariant *data2 = NULL;
+  GVariant *print_id_var1 = NULL;
+  GVariant *print_id_var2 = NULL;
+  gboolean is_equal = FALSE;
+
+  
+
+  // if (self->type != other->type)
+  //   return FALSE;
+
+  // if (g_strcmp0 (self->driver, other->driver))
+  //   return FALSE;
+
+  // if (g_strcmp0 (self->device_id, other->device_id))
+  //   return FALSE;
+
+  g_object_get(self, "fpi-data", &data1, NULL);
+  g_object_get(other, "fpi-data", &data2, NULL);
+
+  if (!data1 || !data2)
+    goto cleanup;
+
+  print_id_var1 = g_variant_get_child_value(data1, 0); 
+  print_id_var2 = g_variant_get_child_value(data2, 0);
+
+  is_equal = g_variant_equal(print_id_var1, print_id_var2);
+
+
+cleanup:
+  if (data1)
+    g_variant_unref(data1);
+  if (data2)
+    g_variant_unref(data2);
+  if (print_id_var1)
+    g_variant_unref(print_id_var1);
+  if (print_id_var2)
+    g_variant_unref(print_id_var2);
+
+  return is_equal;
+
+}
+
+static FpPrint *
+crfpmoc_create_empty_frame_print (FpDevice *self, FpPrint *in_print)
+{
+  g_return_val_if_fail(in_print != NULL, NULL);
+
+  FpPrint *out_print = fp_print_new(self); // Create a new FpPrint object
+  if (!out_print)
+    return NULL;
+
+  g_autofree gchar *descr = NULL;
+  GVariant *print_id_var = NULL;
+  GVariant *fpi_data = NULL;
+  GVariant *frame_var = NULL;
+
+  // Get the print data descriptor from the input print object
+  descr = get_print_data_descriptor(in_print, 0); // Assuming template is 0 for simplicity
+  if (!descr)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  // Create a GVariant for the print ID
+  print_id_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, descr, strlen(descr), sizeof(guchar));
+  if (!print_id_var)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  // Create an empty array for the frame
+  frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, NULL, 0, sizeof(guint8));
+  if (!frame_var)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  // Combine the print ID and empty frame into a GVariant
+  fpi_data = g_variant_new("(@ay@ay)", print_id_var, frame_var);
+  if (!fpi_data)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  // Set the properties of the new print object
+  fpi_print_set_type(out_print, FPI_PRINT_RAW);
+  g_object_set(out_print, "fpi-data", fpi_data, NULL);
+
+  return out_print;
+}
+
+
+
+
 
 static gboolean
 crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
@@ -483,6 +596,7 @@ crfpmoc_open (FpDevice *device)
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   const char *file = fpi_device_get_udev_data (FP_DEVICE (device), FPI_DEVICE_UDEV_SUBTYPE_MISC);
   GError *err = NULL;
+  gboolean r;
 
   fp_dbg ("Opening device %s", file);
 
@@ -499,6 +613,14 @@ crfpmoc_open (FpDevice *device)
     }
 
   self->fd = fd;
+
+  r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
+  if (!r)
+    {
+     g_clear_error (&err);
+     g_set_error (&err, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to ensure seed");
+      fpi_device_open_complete (device, err);
+    }
 
 
 
@@ -579,15 +701,6 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
         fpi_ssm_next_state (ssm);
        
       break;
-
-    case ENROLL_ENSHURE_SEED:
-      r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
-      if (!r)
-        fpi_ssm_mark_failed (ssm, error);
-      else
-        fpi_ssm_next_state (ssm);
-      break;
-
 
     case ENROLL_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
@@ -698,6 +811,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   FpPrint *print = NULL;
   FpPrint *verify_print = NULL;
   GPtrArray *prints;
+  GPtrArray *converted_prints;
   gboolean found = FALSE;
   guint index;
   gboolean r;
@@ -714,14 +828,8 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         fpi_ssm_mark_failed (ssm, error);
       else
         fpi_ssm_next_state (ssm);
-
-      // TODO: Move to dedicated state
-      r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
-      if(!r)
-        fpi_ssm_mark_failed (ssm, error);
-
       break;
-
+      
     case VERIFY_WAIT_FINGER:
       fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED);
       crfpmoc_cmd_wait_event_fingerprint (self);
@@ -775,6 +883,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
           else
             {
               print = fp_print_new (device);
+
               crfpmoc_set_print_data (print, template, NULL, 0);
 
               fp_info ("Identify successful for template %d", template);
@@ -782,9 +891,12 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
               if (is_identify)
                 {
                   fpi_device_get_identify_data (device, &prints);
+
+                  
+
                   found = g_ptr_array_find_with_equal_func (prints,
                                                             print,
-                                                            (GEqualFunc) fp_print_equal,
+                                                            (GEqualFunc) crfpmoc_print_equal,
                                                             &index);
 
                   if (found)
