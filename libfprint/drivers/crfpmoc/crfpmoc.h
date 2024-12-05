@@ -315,3 +315,4 @@ typedef enum {
   CLEAR_STORAGE_SENSOR_RESET,
   CLEAR_STORAGE_STATES,
 } ClearStorageStates;
+

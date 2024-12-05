@@ -130,58 +130,45 @@ crfpmoc_set_print_data (FpPrint *print, gint8 template, guint8 *frame, size_t fr
 
 }
 
-// required since the downloaded frame data is encrypted and 2 downloads are not the same
-// so a compare function, that ignores frame_var is required and only compares on the print_id_var
-gboolean
-crfpmoc_print_equal (FpPrint *self, FpPrint *other)
-{
 
 
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(other != NULL, FALSE);
+static void 
+crfpmoc_get_print_data(FpPrint *print, guint8 **frame, size_t *frame_size) {
+    g_autoptr(GVariant) fpi_data = NULL;
+    g_autoptr(GVariant) frame_var = NULL;
+    const guint8 *frame_data = NULL;
+    gsize frame_data_size = 0;
 
-  GVariant *data1 = NULL;
-  GVariant *data2 = NULL;
-  GVariant *print_id_var1 = NULL;
-  GVariant *print_id_var2 = NULL;
-  gboolean is_equal = FALSE;
+    if (frame) {
+        *frame = NULL;
+    }
+    if (frame_size) {
+        *frame_size = 0;
+    }
 
-  
+    g_object_get(print, "fpi-data", &fpi_data, NULL);
 
-  // if (self->type != other->type)
-  //   return FALSE;
+    if (!fpi_data) {
+        g_warning("No fpi-data found in the print object.");
+        return;
+    }
 
-  // if (g_strcmp0 (self->driver, other->driver))
-  //   return FALSE;
+    g_variant_get(fpi_data, "(@ay@ay)", NULL, &frame_var);
 
-  // if (g_strcmp0 (self->device_id, other->device_id))
-  //   return FALSE;
-
-  g_object_get(self, "fpi-data", &data1, NULL);
-  g_object_get(other, "fpi-data", &data2, NULL);
-
-  if (!data1 || !data2)
-    goto cleanup;
-
-  print_id_var1 = g_variant_get_child_value(data1, 0); 
-  print_id_var2 = g_variant_get_child_value(data2, 0);
-
-  is_equal = g_variant_equal(print_id_var1, print_id_var2);
-
-
-cleanup:
-  if (data1)
-    g_variant_unref(data1);
-  if (data2)
-    g_variant_unref(data2);
-  if (print_id_var1)
-    g_variant_unref(print_id_var1);
-  if (print_id_var2)
-    g_variant_unref(print_id_var2);
-
-  return is_equal;
-
+    if (frame_var) {
+        frame_data = g_variant_get_fixed_array(frame_var, &frame_data_size, sizeof(guint8));
+        if (frame_data && frame_data_size > 0) {
+            if (frame) {
+                *frame = g_memdup2(frame_data, frame_data_size);
+            }
+            if (frame_size) {
+                *frame_size = frame_data_size;
+            }
+        }
+    }
 }
+
+
 
 static FpPrint *
 crfpmoc_create_empty_frame_print (FpDevice *self, FpPrint *in_print)
@@ -238,6 +225,24 @@ crfpmoc_create_empty_frame_print (FpDevice *self, FpPrint *in_print)
 
 
 
+// required since the downloaded frame data is encrypted and 2 downloads are not the same
+// so a compare function, that ignores frame_var is required and only compares on the print_id_var
+static gboolean
+crfpmoc_print_equal (FpPrint *self, FpPrint *other, FpDevice *device)
+{
+  gboolean is_equal = FALSE;
+
+  FpPrint *print1 = crfpmoc_create_empty_frame_print(device, self);
+  FpPrint *print2 = crfpmoc_create_empty_frame_print(device, other);
+
+  is_equal = fp_print_equal(print1, print2);
+
+  g_object_unref(print1);
+  g_object_unref(print2);
+
+  return is_equal;
+
+}
 
 
 static gboolean
@@ -811,7 +816,6 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   FpPrint *print = NULL;
   FpPrint *verify_print = NULL;
   GPtrArray *prints;
-  GPtrArray *converted_prints;
   gboolean found = FALSE;
   guint index;
   gboolean r;
@@ -823,6 +827,24 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VERIFY_SENSOR_MATCH:
+
+      fpi_device_get_identify_data (device, &prints);
+      if (prints->len != 0)
+      {
+        FpPrint *test = g_ptr_array_index (prints, 0);
+        guint8 *frame;
+        size_t frame_size;
+        crfpmoc_get_print_data(test, &frame, &frame_size);
+        
+        // upload the frame to the device
+
+      
+
+
+      }
+
+      // fpi_device_get_verify_data (device, &verify_print); TODO: add verify functionality
+
       r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_MATCH, &mode, &error);
       if (!r)
         fpi_ssm_mark_failed (ssm, error);
@@ -894,10 +916,15 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 
                   
 
-                  found = g_ptr_array_find_with_equal_func (prints,
-                                                            print,
-                                                            (GEqualFunc) crfpmoc_print_equal,
-                                                            &index);
+                  for (index = 0; index < prints->len; index++)
+                    {
+                      FpPrint *p = g_ptr_array_index (prints, index);
+                      if (crfpmoc_print_equal (p, print, device))
+                        {
+                          found = TRUE;
+                          break;
+                        }
+                    }
 
                   if (found)
                     fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
@@ -909,7 +936,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
                   fpi_device_get_verify_data (device, &verify_print);
                   fp_info ("Verifying against: %s", fp_print_get_description (verify_print));
 
-                  if (fp_print_equal (verify_print, print))
+                  if (crfpmoc_print_equal (verify_print, print, device))
                     fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
                   else
                     fpi_device_verify_report (device, FPI_MATCH_FAIL, print, NULL);
