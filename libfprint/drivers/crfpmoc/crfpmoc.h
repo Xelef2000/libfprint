@@ -99,6 +99,20 @@ struct crfpmoc_ec_params_fp_frame {
 	guint32 size;
 } __attribute__((packed));
 
+/* Load a template into the MCU */
+#define CRFPMOC_EC_CMD_FP_TEMPLATE 0x0405
+/* Flag in the 'size' field indicating that the full template has been sent */
+#define CRFPMOC_FP_TEMPLATE_COMMIT 0x80000000
+
+
+struct crfpmoc_ec_params_fp_template {
+	guint32 offset;
+	guint32 size;
+	guint8 data[];
+}  __attribute__((packed));
+
+
+
 #define CRFPMOC_EC_CMD_GET_PROTOCOL_INFO 0x000B
 struct crfpmoc_ec_response_get_protocol_info {
 	/* Fields which exist if at least protocol version 3 supported */
@@ -108,12 +122,22 @@ struct crfpmoc_ec_response_get_protocol_info {
 	guint32 flags;
 } __attribute__((packed));
 
+// crfpmoc_ec_host_response and crfpmoc_ec_host_request are only here for the size of the struct
 struct crfpmoc_ec_host_response {
 	guint8 struct_version;
 	guint8 checksum;
 	guint16 result;
 	guint16 data_len;
 	guint16 reserved;
+} __attribute__((packed));
+
+struct crfpmoc_ec_host_request {
+	guint8 struct_version;
+	guint8 checksum;
+	guint16 command;
+	guint8 command_version;
+	guint8 reserved;
+	guint16 data_len;
 } __attribute__((packed));
 
 #define CRFPMOC_EC_CMD_FP_ENC_STATUS 0x0409

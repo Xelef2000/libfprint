@@ -498,6 +498,21 @@ crfpmoc_ec_max_insize(FpiDeviceCrfpMoc *self, guint32 *max_insize, GError **erro
 }
 
 static gboolean
+crfpmoc_ec_max_outsize(FpiDeviceCrfpMoc *self, guint32 *max_outsize, GError **error)
+{
+  struct crfpmoc_ec_response_get_protocol_info protocol_info;
+  gboolean rv;
+
+  rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_GET_PROTOCOL_INFO, 0, NULL, 0, &protocol_info, sizeof(protocol_info), error);
+  if (!rv)
+    return rv;
+
+  *max_outsize = protocol_info.max_request_packet_size - sizeof(struct crfpmoc_ec_host_request);
+
+  return TRUE;
+}
+
+static gboolean
 crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
                            struct crfpmoc_ec_response_fp_info *info,
                            gint index,
@@ -550,7 +565,7 @@ crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
       num_attempts++;
       rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_FP_FRAME, 0, &p, sizeof(p), ptr, stride, error);
       if (rv) {
-        break; // Success
+        break; 
       }
       if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
         fp_dbg("Access denied, stopping retrying");
@@ -571,6 +586,78 @@ crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
 
   *out_buffer = buffer;
   return TRUE;
+}
+
+static gboolean
+crfpmoc_fp_upload_template (FpiDeviceCrfpMoc *self,
+                            const guint8     *template_data,
+                            gsize             template_size,
+                            GError          **error)
+{
+    struct crfpmoc_ec_params_fp_template *p = NULL;
+    guint32 offset = 0;
+    guint32 tlen;
+    gboolean rv = FALSE;
+    guint32 ec_max_outsize = 0;
+    guint32 max_chunk =  0;
+    gsize struct_size;
+
+    rv = crfpmoc_ec_max_outsize(self, &ec_max_outsize, error);
+    if (!rv) {
+        g_prefix_error(error, "Failed to get max outsize: ");
+        return FALSE;
+    }
+    
+    max_chunk = ec_max_outsize - offsetof(struct crfpmoc_ec_params_fp_template, data) - 4;
+
+
+    while (template_size > 0) {
+        tlen = MIN(max_chunk, template_size);
+
+        struct_size = offsetof(struct crfpmoc_ec_params_fp_template, data) + tlen;
+        p = g_malloc0(struct_size);
+
+        if (!p) {
+            g_set_error(error,
+                        G_IO_ERROR,
+                        G_DBUS_ERROR_NO_MEMORY,
+                        "Failed to allocate memory for template upload.");
+            return FALSE;
+        }
+
+        p->offset = offset;
+        p->size = tlen;
+
+        template_size -= tlen;
+
+        if (!template_size) {
+            p->size |= CRFPMOC_FP_TEMPLATE_COMMIT; 
+        }
+
+
+        memcpy(p->data, template_data + offset, tlen);
+
+        rv = crfpmoc_ec_command(self,
+                                CRFPMOC_EC_CMD_FP_TEMPLATE,
+                                0,
+                                p,
+                                offsetof(struct crfpmoc_ec_params_fp_template, data) + tlen,
+                                NULL,
+                                0,
+                                error);
+
+        g_free(p);
+        p = NULL;
+
+        if (!rv) {
+            g_prefix_error(error, "Failed to upload template chunk at offset %u: ", offset);
+            return FALSE;
+        }
+
+        offset += tlen;
+    }
+
+    return TRUE;
 }
 
 
@@ -836,8 +923,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         size_t frame_size;
         crfpmoc_get_print_data(test, &frame, &frame_size);
         
-        // upload the frame to the device
-
+        crfpmoc_fp_upload_template(self, frame, frame_size, &error);
       
 
 
