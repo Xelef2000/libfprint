@@ -293,6 +293,9 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
       return FALSE;
     }
 
+  // sleep 0.1 seconds to prevent the device from being overwhelmed
+  usleep(100000);
+
   return TRUE;
 }
 
@@ -465,6 +468,7 @@ crfmoc_cmd_fp_enshure_seed (FpiDeviceCrfpMoc *self, const char* seed, GError **e
   if (!rv)
     return rv;
 
+
   fp_dbg("FPMCU encryption status: %d", status);
 
   // I don't know why the encryption status is 5 after using verify. Since it should be 1. It also returns to 1 after using enroll
@@ -571,7 +575,7 @@ crfpmoc_fp_download_frame (FpiDeviceCrfpMoc *self,
         fp_dbg("Access denied, stopping retrying");
         break;
       }
-      usleep(100000);
+      usleep(1000);
     }
 
     if (!rv) {
@@ -915,21 +919,42 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
     {
     case VERIFY_SENSOR_MATCH:
 
-      fpi_device_get_identify_data (device, &prints);
-      if (prints->len != 0)
+      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &error);
+
+      if(!r)
       {
-        FpPrint *test = g_ptr_array_index (prints, 0);
-        guint8 *frame;
-        size_t frame_size;
-        crfpmoc_get_print_data(test, &frame, &frame_size);
-        
-        crfpmoc_fp_upload_template(self, frame, frame_size, &error);
-      
-
-
+        fpi_ssm_mark_failed (ssm, error);
+      }
+      else
+      {
+        fpi_ssm_next_state (ssm);
       }
 
-      // fpi_device_get_verify_data (device, &verify_print); TODO: add verify functionality
+
+      gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
+      if(is_identify)
+      {
+        fpi_device_get_identify_data (device, &prints);
+        if (prints->len != 0)
+        {
+          FpPrint *test = g_ptr_array_index (prints, 0);
+          guint8 *frame;
+          size_t frame_size;
+          crfpmoc_get_print_data(test, &frame, &frame_size);
+          
+          crfpmoc_fp_upload_template(self, frame, frame_size, &error);
+          g_free(frame);
+        }
+      }
+      else
+      {
+        fpi_device_get_verify_data (device, &verify_print);
+        guint8 *frame;
+        size_t frame_size;
+        crfpmoc_get_print_data(verify_print, &frame, &frame_size);
+        crfpmoc_fp_upload_template(self, frame, frame_size, &error);
+        g_free(frame);
+      }
 
       r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_MATCH, &mode, &error);
       if (!r)
@@ -978,7 +1003,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         }
       else
         {
-          gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
+          is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
           if (template == -1)
             {
               fp_info ("Print was not identified by the device");
