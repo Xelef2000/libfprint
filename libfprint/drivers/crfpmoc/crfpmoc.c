@@ -294,7 +294,7 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
     }
 
   // sleep 0.1 seconds to prevent the device from being overwhelmed
-  usleep(100000);
+  usleep(10000);
 
   return TRUE;
 }
@@ -693,6 +693,8 @@ crfpmoc_open (FpDevice *device)
   const char *file = fpi_device_get_udev_data (FP_DEVICE (device), FPI_DEVICE_UDEV_SUBTYPE_MISC);
   GError *err = NULL;
   gboolean r;
+  guint32 mode;
+
 
   fp_dbg ("Opening device %s", file);
 
@@ -717,6 +719,12 @@ crfpmoc_open (FpDevice *device)
      g_set_error (&err, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to ensure seed");
       fpi_device_open_complete (device, err);
     }
+
+  usleep(1000);    
+
+  r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &err);
+
+
 
 
 
@@ -905,30 +913,20 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 {
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   FpPrint *print = NULL;
-  FpPrint *verify_print = NULL;
   GPtrArray *prints;
-  gboolean found = FALSE;
-  guint index;
   gboolean r;
   guint32 mode;
   gint8 template = -1;
   GError *error;
+  guint8 *frame;
+  size_t frame_size;
+
 
 
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VERIFY_SENSOR_MATCH:
-
-      r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &error);
-
-      if(!r)
-      {
-        fpi_ssm_mark_failed (ssm, error);
-      }
-      else
-      {
-        fpi_ssm_next_state (ssm);
-      }
+      usleep(1000);
 
 
       gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
@@ -937,21 +935,22 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         fpi_device_get_identify_data (device, &prints);
         if (prints->len != 0)
         {
-          FpPrint *test = g_ptr_array_index (prints, 0);
-          guint8 *frame;
-          size_t frame_size;
-          crfpmoc_get_print_data(test, &frame, &frame_size);
+
+          for (guint index = 0; index < prints->len; index++)
+          {
+            print = g_ptr_array_index (prints, index);
+            crfpmoc_get_print_data (print, &frame, &frame_size);
+            crfpmoc_fp_upload_template(self, frame, frame_size, &error);
+          }
           
-          crfpmoc_fp_upload_template(self, frame, frame_size, &error);
           g_free(frame);
         }
       }
       else
       {
-        fpi_device_get_verify_data (device, &verify_print);
-        guint8 *frame;
-        size_t frame_size;
-        crfpmoc_get_print_data(verify_print, &frame, &frame_size);
+        fpi_device_get_verify_data (device, &print);
+
+        crfpmoc_get_print_data(print, &frame, &frame_size);
         crfpmoc_fp_upload_template(self, frame, frame_size, &error);
         g_free(frame);
       }
@@ -1023,7 +1022,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 
               if (is_identify)
                 {
-                  fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
+                  fpi_device_identify_report (device, g_ptr_array_index (prints, template), print, NULL);
                 }
               else
                 {  
@@ -1037,6 +1036,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
           fpi_ssm_mark_completed (ssm);
         }
       break;
+
     }
 }
 
