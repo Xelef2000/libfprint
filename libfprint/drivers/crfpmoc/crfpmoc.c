@@ -1023,34 +1023,11 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 
               if (is_identify)
                 {
-                  fpi_device_get_identify_data (device, &prints);
-
-                  
-
-                  for (index = 0; index < prints->len; index++)
-                    {
-                      FpPrint *p = g_ptr_array_index (prints, index);
-                      if (crfpmoc_print_equal (p, print, device))
-                        {
-                          found = TRUE;
-                          break;
-                        }
-                    }
-
-                  if (found)
-                    fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
-                  else
-                    fpi_device_identify_report (device, NULL, print, NULL);
+                  fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
                 }
               else
-                {
-                  fpi_device_get_verify_data (device, &verify_print);
-                  fp_info ("Verifying against: %s", fp_print_get_description (verify_print));
-
-                  if (crfpmoc_print_equal (verify_print, print, device))
-                    fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
-                  else
-                    fpi_device_verify_report (device, FPI_MATCH_FAIL, print, NULL);
+                {  
+                  fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
                 }
             }
           if (is_identify)
