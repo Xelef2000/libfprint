@@ -2,6 +2,7 @@
  * ChromeOS Fingerprint driver for libfprint
  *
  * Copyright (C) 2024 Abhinav Baid <abhinavbaid@gmail.com>
+ * Copyright (C) 2024 Felix Niederer <felix@niederer.dev>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
