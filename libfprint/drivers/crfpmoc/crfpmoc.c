@@ -411,6 +411,25 @@ crfpmoc_cmd_fp_info (FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, GError
 }
 
 static gboolean
+crfpmoc_cmd_fp_max_templates (FpiDeviceCrfpMoc *self, guint16 *max_templates, GError **error)
+{
+  struct crfpmoc_ec_response_fp_info r;
+  gboolean rv;
+
+  rv = crfpmoc_ec_command (self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &r, sizeof (r), error);
+  if (!rv)
+    return rv;
+
+  fp_dbg ("Fingerprint sensor: vendor %x product %x model %x version %x", r.vendor_id, r.product_id, r.model_id, r.version);
+  fp_dbg ("Image: size %dx%d %d bpp", r.width, r.height, r.bpp);
+  fp_dbg ("Templates: version %d size %d count %d/%d dirty bitmap %x", r.template_version, r.template_size, r.template_valid, r.template_max, r.template_dirty);
+
+  *max_templates = r.template_max;
+  return TRUE;
+}
+
+
+static gboolean
 crfpmoc_cmd_fp_stats (FpiDeviceCrfpMoc *self, gint8 *template, GError **error)
 {
   struct crfpmoc_ec_response_fp_stats r;
@@ -714,7 +733,7 @@ crfpmoc_open (FpDevice *device)
 
   self->fd = fd;
 
-  r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb", &err);
+  r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
   if (!r)
     {
      g_clear_error (&err);
@@ -731,10 +750,8 @@ crfpmoc_open (FpDevice *device)
   // r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &err);
 
   // set user context
+  // context can't be set here, since it needs to be cleard for every id attempt
   // crfpmoc_fp_set_context (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
-
-
-
 
 
   fpi_device_open_complete (device, NULL);
@@ -934,8 +951,9 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   guint32 mode;
   gint8 template = -1;
   GError *error;
-  guint8 *frame;
+  guint8 *frame = NULL;
   size_t frame_size;
+  guint16 max_templates = 1;  
 
 
 
@@ -943,10 +961,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
     {
     case VERIFY_SENSOR_MATCH:
 
-
-
       usleep(100);
-
 
       gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
       if(is_identify)
@@ -955,7 +970,10 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         if (prints->len != 0)
         {
 
-          for (guint index = 0; index < prints->len; index++)
+          crfpmoc_cmd_fp_max_templates (self, &max_templates, &error);
+          // TODO: handle error
+
+          for (guint index = 0; (index < prints->len) && (index < max_templates) ; index++)
           {
             print = g_ptr_array_index (prints, index);
             crfpmoc_get_print_data (print, &frame, &frame_size);
