@@ -325,9 +325,6 @@ crfpmoc_fp_set_context (FpiDeviceCrfpMoc *self,
     
     fp_dbg ("Setting context to '%s'", context);
 
-
-
-    // Ensure context is of the correct size
     if (!context || strlen((const gchar *)context) != sizeof(p.userid)) {
         g_set_error(error,
                     G_IO_ERROR,
@@ -337,11 +334,9 @@ crfpmoc_fp_set_context (FpiDeviceCrfpMoc *self,
         return FALSE;
     }
 
-    // Set the initial context action
     p.action = CRFPMOC_FP_CONTEXT_ASYNC;
     memcpy(p.userid, context, sizeof(p.userid));
 
-    // Send the initial command to set the context
     rv = crfpmoc_ec_command(self,
                             CRFPMOC_EC_CMD_FP_CONTEXT,
                             1,
@@ -353,37 +348,38 @@ crfpmoc_fp_set_context (FpiDeviceCrfpMoc *self,
 
     if (!rv) {
         g_prefix_error(error, "Initiating context setting failed: ");
-
         fp_dbg("Initiating context setting failed. Error: %s", (*error)->message);
-
         return FALSE;
     }
 
-    // Poll for the result with retries
-    while (tries-- > 0) {
-        g_usleep(100000); // Sleep for 100ms
+    for (int i = 0; i < tries; i++) {
+      g_usleep(100000); // Sleep for 100ms
 
-        p.action = CRFPMOC_FP_CONTEXT_GET_RESULT;
-        rv = crfpmoc_ec_command(self,
-                                CRFPMOC_EC_CMD_FP_CONTEXT,
-                                1,
-                                &p,
-                                sizeof(p),
-                                NULL,
-                                0,
-                                error);
+      p.action = CRFPMOC_FP_CONTEXT_GET_RESULT;
+      rv = crfpmoc_ec_command(self,
+                              CRFPMOC_EC_CMD_FP_CONTEXT,
+                              1,
+                              &p,
+                              sizeof(p),
+                              NULL,
+                              0,
+                              error);
 
-        if (rv) {
-            fp_dbg("Context set successfully.");
-            // TODO: clear error
-            return TRUE;
-        }
+      if (rv) {
+          fp_dbg("Context set successfully.");
+          return TRUE;
+      }
 
-        fp_dbg("Context setting is still in progress.");
-        // TODO: Only continue if the error is "EC result 16 (BUSY)"
-    }
+      if (strcmp((*error)->message, "BUSY") != 0) {
+          g_prefix_error(error, "Setting context failed: ");
+          fp_dbg("Setting context failed. Error: %s", (*error)->message);
+          return FALSE;
+      }
 
-    // If we exhaust retries, set a timeout error
+      fp_dbg("Context setting is still in progress. Attempt %d of %d", (i+1), tries);
+  }
+
+
     g_set_error(error,
                 G_IO_ERROR,
                 G_IO_ERROR_TIMED_OUT,
@@ -733,7 +729,7 @@ crfpmoc_open (FpDevice *device)
 
   self->fd = fd;
 
-  r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
+  r = crfmoc_cmd_fp_enshure_seed (self, CRFPMOC_DEFAULT_SEED, &err);
   if (!r)
     {
      g_clear_error (&err);
@@ -923,13 +919,19 @@ crfpmoc_enroll (FpDevice *device)
 {
   fp_dbg ("Enroll");
   GError *error = NULL;
+  gboolean r;
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   EnrollPrint *enroll_print = g_new0 (EnrollPrint, 1);
 
 
 
-  crfpmoc_fp_set_context (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
-  // TODO: check if successful
+  r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT , &error);
+  if (!r)
+    {
+      fpi_device_enroll_complete (device, NULL, error);
+      return;
+    }
+  
 
 
   fpi_device_get_enroll_data (device, &enroll_print->print);
@@ -970,8 +972,13 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
         if (prints->len != 0)
         {
 
-          crfpmoc_cmd_fp_max_templates (self, &max_templates, &error);
-          // TODO: handle error
+          r = crfpmoc_cmd_fp_max_templates (self, &max_templates, &error);
+          if (!r)
+          {
+            fp_warn ("Failed to get max templates: %s assuming 5 templates", error->message);
+            max_templates = 5;
+          }    
+      
 
           for (guint index = 0; (index < prints->len) && (index < max_templates) ; index++)
           {
@@ -1084,9 +1091,14 @@ crfpmoc_identify_verify (FpDevice *device)
   fp_dbg ("Identify or Verify");
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   GError *error = NULL;
+  gboolean r;
 
-  crfpmoc_fp_set_context (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
-  // TODO: check if successful
+  r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT , &error);
+  if (!r)
+    {
+      fpi_device_identify_complete (device, error);
+      return;
+    }
 
   g_assert (self->task_ssm == NULL);
   self->task_ssm = fpi_ssm_new (device, crfpmoc_verify_run_state, VERIFY_STATES);

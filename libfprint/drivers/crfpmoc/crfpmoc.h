@@ -79,6 +79,11 @@ G_DECLARE_FINAL_TYPE (FpiDeviceCrfpMoc, fpi_device_crfpmoc, FPI, DEVICE_CRFPMOC,
 
 #define CRFPMOC_EC_CMD_FP_FRAME 0x0404
 
+/* Should be made dynamic */
+#define CRFPMOC_DEFAULT_SEED "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+#define CRFPMOC_DEFAULT_CONTEXT "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+
 /* constants defining the 'offset' field which also contains the frame index */
 #define CRFPMOC_FP_FRAME_INDEX_SHIFT 28
 /* Frame buffer where the captured image is stored */
