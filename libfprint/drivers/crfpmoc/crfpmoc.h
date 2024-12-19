@@ -189,6 +189,23 @@ struct crfpmoc_ec_params_fp_seed {
 } __attribute__((packed));
 
 
+/* Clear the current fingerprint user context and set a new one */
+#define CRFPMOC_EC_CMD_FP_CONTEXT 0x0406
+
+enum crfpmoc_fp_context_action {
+	CRFPMOC_FP_CONTEXT_ASYNC = 0,
+	CRFPMOC_FP_CONTEXT_GET_RESULT = 1,
+};
+
+/* Version 1 of the command is "asynchronous". */
+struct crfpmoc_ec_params_fp_context_v1 {
+	guint8 action; /**< enum fp_context_action */
+	guint8 reserved[3]; /**< padding for alignment */
+	guint32 userid[CRFPMOC_FP_CONTEXT_USERID_WORDS];
+} __attribute__((packed));
+
+
+
 struct crfpmoc_ec_response_fp_info
 {
   /* Sensor identification */

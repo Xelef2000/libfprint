@@ -170,81 +170,6 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **frame, size_t *frame_size) {
 
 
 
-static FpPrint *
-crfpmoc_create_empty_frame_print (FpDevice *self, FpPrint *in_print)
-{
-  g_return_val_if_fail(in_print != NULL, NULL);
-
-  FpPrint *out_print = fp_print_new(self); // Create a new FpPrint object
-  if (!out_print)
-    return NULL;
-
-  g_autofree gchar *descr = NULL;
-  GVariant *print_id_var = NULL;
-  GVariant *fpi_data = NULL;
-  GVariant *frame_var = NULL;
-
-  // Get the print data descriptor from the input print object
-  descr = get_print_data_descriptor(in_print, 0); // Assuming template is 0 for simplicity
-  if (!descr)
-  {
-    g_object_unref(out_print);
-    return NULL;
-  }
-
-  // Create a GVariant for the print ID
-  print_id_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, descr, strlen(descr), sizeof(guchar));
-  if (!print_id_var)
-  {
-    g_object_unref(out_print);
-    return NULL;
-  }
-
-  // Create an empty array for the frame
-  frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, NULL, 0, sizeof(guint8));
-  if (!frame_var)
-  {
-    g_object_unref(out_print);
-    return NULL;
-  }
-
-  // Combine the print ID and empty frame into a GVariant
-  fpi_data = g_variant_new("(@ay@ay)", print_id_var, frame_var);
-  if (!fpi_data)
-  {
-    g_object_unref(out_print);
-    return NULL;
-  }
-
-  // Set the properties of the new print object
-  fpi_print_set_type(out_print, FPI_PRINT_RAW);
-  g_object_set(out_print, "fpi-data", fpi_data, NULL);
-
-  return out_print;
-}
-
-
-
-// required since the downloaded frame data is encrypted and 2 downloads are not the same
-// so a compare function, that ignores frame_var is required and only compares on the print_id_var
-static gboolean
-crfpmoc_print_equal (FpPrint *self, FpPrint *other, FpDevice *device)
-{
-  gboolean is_equal = FALSE;
-
-  FpPrint *print1 = crfpmoc_create_empty_frame_print(device, self);
-  FpPrint *print2 = crfpmoc_create_empty_frame_print(device, other);
-
-  is_equal = fp_print_equal(print1, print2);
-
-  g_object_unref(print1);
-  g_object_unref(print2);
-
-  return is_equal;
-
-}
-
-
 static gboolean
 crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
                     int               command,
@@ -293,8 +218,7 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
       return FALSE;
     }
 
-  // sleep 0.1 seconds to prevent the device from being overwhelmed
-  usleep(10000);
+  usleep(100);
 
   return TRUE;
 }
@@ -389,6 +313,84 @@ crfpmoc_cmd_fp_seed (FpiDeviceCrfpMoc *self,const char* seed, GError **error)
 
   return TRUE;
 }
+
+static gboolean
+crfpmoc_fp_set_context (FpiDeviceCrfpMoc *self,
+                        const char     *context,
+                        GError          **error)
+{
+    struct crfpmoc_ec_params_fp_context_v1 p;
+    gboolean rv = FALSE;
+    gint tries = 20; // Wait at most 2 seconds (20 * 100ms)
+    
+    fp_dbg ("Setting context to '%s'", context);
+
+
+
+    // Ensure context is of the correct size
+    if (!context || strlen((const gchar *)context) != sizeof(p.userid)) {
+        g_set_error(error,
+                    G_IO_ERROR,
+                    G_IO_ERROR_INVALID_ARGUMENT,
+                    "Context must be exactly %zu bytes.",
+                    sizeof(p.userid));
+        return FALSE;
+    }
+
+    // Set the initial context action
+    p.action = CRFPMOC_FP_CONTEXT_ASYNC;
+    memcpy(p.userid, context, sizeof(p.userid));
+
+    // Send the initial command to set the context
+    rv = crfpmoc_ec_command(self,
+                            CRFPMOC_EC_CMD_FP_CONTEXT,
+                            1,
+                            &p,
+                            sizeof(p),
+                            NULL,
+                            0,
+                            error);
+
+    if (!rv) {
+        g_prefix_error(error, "Initiating context setting failed: ");
+
+        fp_dbg("Initiating context setting failed. Error: %s", (*error)->message);
+
+        return FALSE;
+    }
+
+    // Poll for the result with retries
+    while (tries-- > 0) {
+        g_usleep(100000); // Sleep for 100ms
+
+        p.action = CRFPMOC_FP_CONTEXT_GET_RESULT;
+        rv = crfpmoc_ec_command(self,
+                                CRFPMOC_EC_CMD_FP_CONTEXT,
+                                1,
+                                &p,
+                                sizeof(p),
+                                NULL,
+                                0,
+                                error);
+
+        if (rv) {
+            fp_dbg("Context set successfully.");
+            // TODO: clear error
+            return TRUE;
+        }
+
+        fp_dbg("Context setting is still in progress.");
+        // TODO: Only continue if the error is "EC result 16 (BUSY)"
+    }
+
+    // If we exhaust retries, set a timeout error
+    g_set_error(error,
+                G_IO_ERROR,
+                G_IO_ERROR_TIMED_OUT,
+                "Failed to set context: operation timed out.");
+    return FALSE;
+}
+
 
 static gboolean
 crfpmoc_cmd_fp_info (FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, GError **error)
@@ -693,7 +695,6 @@ crfpmoc_open (FpDevice *device)
   const char *file = fpi_device_get_udev_data (FP_DEVICE (device), FPI_DEVICE_UDEV_SUBTYPE_MISC);
   GError *err = NULL;
   gboolean r;
-  guint32 mode;
 
 
   fp_dbg ("Opening device %s", file);
@@ -709,10 +710,11 @@ crfpmoc_open (FpDevice *device)
       fpi_device_open_complete (device, err);
       return;
     }
+  
 
   self->fd = fd;
 
-  r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
+  r = crfmoc_cmd_fp_enshure_seed (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb", &err);
   if (!r)
     {
      g_clear_error (&err);
@@ -720,9 +722,16 @@ crfpmoc_open (FpDevice *device)
       fpi_device_open_complete (device, err);
     }
 
-  usleep(1000);    
+  usleep(200);
 
-  r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &err);
+
+  // clear any already uploaded prints
+  // not needed with set context
+  // guint32 mode;
+  // r = crfpmoc_cmd_fp_mode (self, CRFPMOC_FP_MODE_RESET_SENSOR, &mode, &err);
+
+  // set user context
+  // crfpmoc_fp_set_context (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &err);
 
 
 
@@ -896,8 +905,15 @@ static void
 crfpmoc_enroll (FpDevice *device)
 {
   fp_dbg ("Enroll");
+  GError *error = NULL;
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   EnrollPrint *enroll_print = g_new0 (EnrollPrint, 1);
+
+
+
+  crfpmoc_fp_set_context (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
+  // TODO: check if successful
+
 
   fpi_device_get_enroll_data (device, &enroll_print->print);
   enroll_print->stage = 0;
@@ -926,7 +942,10 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VERIFY_SENSOR_MATCH:
-      usleep(1000);
+
+
+
+      usleep(100);
 
 
       gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
@@ -1022,10 +1041,11 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 
               if (is_identify)
                 {
+                  fpi_device_get_identify_data (device, &prints);
                   fpi_device_identify_report (device, g_ptr_array_index (prints, template), print, NULL);
                 }
               else
-                {  
+                { 
                   fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
                 }
             }
@@ -1045,6 +1065,10 @@ crfpmoc_identify_verify (FpDevice *device)
 {
   fp_dbg ("Identify or Verify");
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
+  GError *error = NULL;
+
+  crfpmoc_fp_set_context (self, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &error);
+  // TODO: check if successful
 
   g_assert (self->task_ssm == NULL);
   self->task_ssm = fpi_ssm_new (device, crfpmoc_verify_run_state, VERIFY_STATES);
