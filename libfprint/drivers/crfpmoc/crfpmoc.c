@@ -219,8 +219,6 @@ crfpmoc_ec_command (FpiDeviceCrfpMoc *self,
       return FALSE;
     }
 
-  usleep(100);
-
   return TRUE;
 }
 
@@ -354,7 +352,7 @@ crfpmoc_fp_set_context (FpiDeviceCrfpMoc *self,
     }
 
     for (int i = 0; i < tries; i++) {
-      g_usleep(100000); // Sleep for 100ms
+      g_usleep(80000); // Sleep for 80ms
 
       p.action = CRFPMOC_FP_CONTEXT_GET_RESULT;
       rv = crfpmoc_ec_command(self,
@@ -378,6 +376,7 @@ crfpmoc_fp_set_context (FpiDeviceCrfpMoc *self,
       }
 
       fp_dbg("Context setting is still in progress. Attempt %d of %d", (i+1), tries);
+      *error = NULL;
   }
 
 
@@ -558,7 +557,6 @@ crfpmoc_fp_download_template (FpiDeviceCrfpMoc *self,
   if (!rv) {
     return FALSE;
   }
-  usleep(10000);
 
   rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_FP_INFO, cmdver, NULL, 0, info, rsize, error);
   if (!rv) {
@@ -593,7 +591,6 @@ crfpmoc_fp_download_template (FpiDeviceCrfpMoc *self,
         fp_dbg("Access denied, stopping retrying");
         break;
       }
-      usleep(1000);
     }
 
     if (!rv) {
@@ -754,7 +751,6 @@ crfpmoc_set_keys(FpiDeviceCrfpMoc *self, GError **error)
      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to ensure seed");
     }
 
-  usleep(200);
 
   r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT , error);
   if (!r)
@@ -771,11 +767,6 @@ crfpmoc_clear_context(FpiDeviceCrfpMoc *self)
 {
   gboolean r;
   GError *error = NULL;
-  
-  usleep(200);
-
-
-
   r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT, &error);
 
   return r;
@@ -838,9 +829,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
   gboolean r;
   guint32 mode;
   guint16 enrolled_templates = 0;
-  GError *error;
-
-  GError *serror = NULL; // TODO: remove this
+  GError *error = NULL;
   struct crfpmoc_ec_response_fp_info info;
   guint8 *template = NULL;
   gboolean res;
@@ -918,11 +907,11 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
 
 
 
-      res = crfpmoc_fp_download_template(self, &info,  enrolled_templates - 1, &template ,&serror);
+      res = crfpmoc_fp_download_template(self, &info,  enrolled_templates - 1, &template ,&error);
 
       if (!res) {
-        g_warning("Failed to download template: %s", serror->message);
-        g_clear_error(&serror);
+        g_warning("Failed to download template: %s", error->message);
+        g_clear_error(&error);
         crfpmoc_set_print_data (enroll_print->print, enrolled_templates - 1, NULL, 0);
 
       } else {
@@ -937,7 +926,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
       fp_info ("Enrollment was successful!");
 
 
-      crfpmoc_clear_context(self);
+      // crfpmoc_clear_context(self);
 
       fpi_device_enroll_complete (device, g_object_ref (enroll_print->print), NULL);
 
@@ -994,8 +983,6 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VERIFY_SENSOR_MATCH:
-
-      usleep(100);
 
       gboolean is_identify = fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY;
       if(is_identify)
@@ -1113,7 +1100,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
           fpi_ssm_mark_completed (ssm);
         }
 
-        crfpmoc_clear_context(self);
+        // crfpmoc_clear_context(self);
       break;
 
     }
