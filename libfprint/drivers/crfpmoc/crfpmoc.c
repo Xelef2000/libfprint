@@ -169,6 +169,73 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size)
     }
 }
 
+static FpPrint *
+crfpmoc_create_empty_frame_print (FpDevice *self, FpPrint *in_print)
+{
+  g_return_val_if_fail(in_print != NULL, NULL);
+
+  FpPrint *out_print = fp_print_new(self); // Create a new FpPrint object
+  if (!out_print)
+    return NULL;
+
+  g_autofree gchar *descr = NULL;
+  GVariant *print_id_var = NULL;
+  GVariant *fpi_data = NULL;
+  GVariant *frame_var = NULL;
+
+  descr = get_print_data_descriptor(in_print, 0); // Assuming template is 0 for simplicity
+  if (!descr)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  print_id_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, descr, strlen(descr), sizeof(guchar));
+  if (!print_id_var)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  frame_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, NULL, 0, sizeof(guint8));
+  if (!frame_var)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  fpi_data = g_variant_new("(@ay@ay)", print_id_var, frame_var);
+  if (!fpi_data)
+  {
+    g_object_unref(out_print);
+    return NULL;
+  }
+
+  fpi_print_set_type(out_print, FPI_PRINT_RAW);
+  g_object_set(out_print, "fpi-data", fpi_data, NULL);
+
+  return out_print;
+}
+
+// required since the downloaded frame data is encrypted and 2 downloads are not the same
+// so a compare function, that ignores frame_var is required and only compares on the print_id_var
+static gboolean
+crfpmoc_print_equal (FpPrint *self, FpPrint *other, FpDevice *device)
+{
+  gboolean is_equal = FALSE;
+
+  FpPrint *print1 = crfpmoc_create_empty_frame_print(device, self);
+  FpPrint *print2 = crfpmoc_create_empty_frame_print(device, other);
+
+  is_equal = fp_print_equal(print1, print2);
+
+  g_object_unref(print1);
+  g_object_unref(print2);
+
+  return is_equal;
+
+}
+
 
 
 static gboolean
@@ -949,6 +1016,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
 {
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
   FpPrint *print = NULL;
+  FpPrint *verify_print = NULL;
   GPtrArray *prints;
   gboolean r;
   guint32 mode;
@@ -957,6 +1025,8 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   guint8 *template = NULL;
   size_t template_size;
   guint16 max_templates = 1;  
+  guint index = 0;
+  gboolean found = FALSE;
 
 
 
@@ -981,7 +1051,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
           }    
       
 
-          for (guint index = 0; (index < prints->len) && (index < max_templates) ; index++)
+          for (index = 0; (index < prints->len) && (index < max_templates) ; index++)
           {
             print = g_ptr_array_index (prints, index);
             crfpmoc_get_print_data (print, &template, &template_size);
@@ -1068,11 +1138,34 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
               if (is_identify)
                 {
                   fpi_device_get_identify_data (device, &prints);
-                  fpi_device_identify_report (device, g_ptr_array_index (prints, template_idx), print, NULL);
+
+                  
+
+                  for (index = 0; index < prints->len; index++)
+                    {
+                      FpPrint *p = g_ptr_array_index (prints, index);
+                      if (crfpmoc_print_equal (p, print, device))
+                        {
+                          found = TRUE;
+                          fp_info ("Identified against: %s", fp_print_get_description (p));
+                          break;
+                        }
+                    }
+
+                  if (found)
+                    fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
+                  else
+                    fpi_device_identify_report (device, NULL, print, NULL);
                 }
               else
-                { 
-                  fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
+                {
+                  fpi_device_get_verify_data (device, &verify_print);
+                  fp_info ("Verifying against: %s", fp_print_get_description (verify_print));
+
+                  if (crfpmoc_print_equal (verify_print, print, device))
+                    fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
+                  else
+                    fpi_device_verify_report (device, FPI_MATCH_FAIL, print, NULL);
                 }
             }
           if (is_identify)
@@ -1082,7 +1175,6 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
           fpi_ssm_mark_completed (ssm);
         }
       break;
-
     }
 }
 
