@@ -708,10 +708,8 @@ static void
 crfpmoc_open (FpDevice *device)
 {
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC (device);
-  const char *file = fpi_device_get_udev_data (FP_DEVICE (device), FPI_DEVICE_UDEV_SUBTYPE_MISC);
   GError *err = NULL;
-  gboolean r;
-
+  const char *file = fpi_device_get_udev_data (FP_DEVICE (device), FPI_DEVICE_UDEV_SUBTYPE_MISC);
 
   fp_dbg ("Opening device %s", file);
 
@@ -730,15 +728,7 @@ crfpmoc_open (FpDevice *device)
 
   self->fd = fd;
 
-  r = crfmoc_cmd_fp_enshure_seed (self, CRFPMOC_DEFAULT_SEED, &err);
-  if (!r)
-    {
-     g_clear_error (&err);
-     g_set_error (&err, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to ensure seed");
-      fpi_device_open_complete (device, err);
-    }
 
-  usleep(200);
 
 
   // clear any already uploaded prints
@@ -753,6 +743,44 @@ crfpmoc_open (FpDevice *device)
 
   fpi_device_open_complete (device, NULL);
 }
+
+static gboolean
+crfpmoc_set_keys(FpiDeviceCrfpMoc *self, GError **error)
+{
+  gboolean r;
+  r = crfmoc_cmd_fp_enshure_seed (self, CRFPMOC_DEFAULT_SEED, error);
+  if (!r)
+    {
+     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to ensure seed");
+    }
+
+  usleep(200);
+
+  r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT , error);
+  if (!r)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to set context");
+    }
+
+  return r;
+}
+
+
+static gboolean
+crfpmoc_clear_context(FpiDeviceCrfpMoc *self)
+{
+  gboolean r;
+  GError *error = NULL;
+  
+  usleep(200);
+
+
+
+  r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT, &error);
+
+  return r;
+}
+
 
 
 
@@ -812,7 +840,7 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
   guint16 enrolled_templates = 0;
   GError *error;
 
-  GError *serror = NULL;
+  GError *serror = NULL; // TODO: remove this
   struct crfpmoc_ec_response_fp_info info;
   guint8 *template = NULL;
   gboolean res;
@@ -908,6 +936,9 @@ crfpmoc_enroll_run_state (FpiSsm *ssm, FpDevice *device)
 
       fp_info ("Enrollment was successful!");
 
+
+      crfpmoc_clear_context(self);
+
       fpi_device_enroll_complete (device, g_object_ref (enroll_print->print), NULL);
 
       fpi_ssm_mark_completed (ssm);
@@ -925,9 +956,8 @@ crfpmoc_enroll (FpDevice *device)
   EnrollPrint *enroll_print = g_new0 (EnrollPrint, 1);
 
 
-
-  r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT , &error);
-  if (!r)
+    r = crfpmoc_set_keys(self, &error);
+    if (!r)
     {
       fpi_device_enroll_complete (device, NULL, error);
       return;
@@ -954,6 +984,7 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
   guint32 mode;
   gint8 template_idx = -1;
   GError *error;
+
   guint8 *template = NULL;
   size_t template_size;
   guint16 max_templates = 1;  
@@ -1081,6 +1112,8 @@ crfpmoc_verify_run_state (FpiSsm *ssm, FpDevice *device)
             fpi_device_verify_complete (device, NULL);
           fpi_ssm_mark_completed (ssm);
         }
+
+        crfpmoc_clear_context(self);
       break;
 
     }
@@ -1094,7 +1127,7 @@ crfpmoc_identify_verify (FpDevice *device)
   GError *error = NULL;
   gboolean r;
 
-  r = crfpmoc_fp_set_context (self, CRFPMOC_DEFAULT_CONTEXT , &error);
+  r = crfpmoc_set_keys(self, &error);
   if (!r)
     {
       fpi_device_identify_complete (device, error);
