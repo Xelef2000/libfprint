@@ -132,7 +132,6 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
   const guint8 *template_data = NULL;
   gsize template_data_size = 0;
 
-
   if (template)
   {
     *template = NULL;
@@ -160,8 +159,6 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
 
   g_variant_get(fpi_data, "(@ay@ayii)", NULL, &template_var, ec_max_outsize, max_templates);
 
-
-
   if (template_var)
   {
     template_data = g_variant_get_fixed_array(template_var, &template_data_size, sizeof(guint8));
@@ -177,8 +174,6 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
       }
     }
   }
-
-
 }
 
 static gboolean
@@ -888,6 +883,7 @@ crfpmoc_enroll_run_state(FpiSsm *ssm, FpDevice *device)
         fpi_ssm_jump_to_state(ssm, ENROLL_SENSOR_ENROLL);
       }
     }
+
     break;
 
   case ENROLL_COMMIT:
@@ -957,7 +953,8 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC(device);
   FpPrint *print = NULL;
   GPtrArray *prints;
-  gboolean r;
+  gboolean r = FALSE;
+  gboolean rl = FALSE;
   guint32 mode;
   gint8 template_idx = -1;
   GError *error;
@@ -966,37 +963,42 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
 
   size_t template_size = 0;
 
-
   guint16 fp_ec_max_outsize = 10; // TODO: choose better default
   guint16 fp_max_templates = 10;
 
-  
-
   switch (fpi_ssm_get_cur_state(ssm))
   {
-  case VERIFY_SENSOR_MATCH:
+  case VERIFY_UPLOAD_TEMPLATE:
 
     gboolean is_identify = fpi_device_get_current_action(device) == FPI_DEVICE_ACTION_IDENTIFY;
-
-    
-
 
     if (is_identify)
     {
       fpi_device_get_identify_data(device, &prints);
       if (prints->len != 0)
       {
-        
+
+        r = FALSE;
         for (guint index = 0; (index < prints->len) && (index < fp_max_templates); index++)
         {
           print = g_ptr_array_index(prints, index);
-         
+
           crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
 
-          crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
-        }
+          rl = crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
 
-        g_free(template);
+          if (rl)
+          {
+            r = TRUE;
+          }
+          else
+          {
+            fp_warn("Failed to upload template nr %d: %s", index, error->message);
+            g_clear_error(&error);
+          }
+
+          g_free(template);
+        }
       }
     }
     else
@@ -1004,9 +1006,23 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
       fpi_device_get_verify_data(device, &print);
 
       crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
-      crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
+      r = crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
       g_free(template);
     }
+
+    if (!r)
+    {
+      fp_err("No template could be uploaded");
+      fpi_ssm_mark_failed(ssm, error);
+    }
+    else
+    {
+      fpi_ssm_next_state(ssm);
+    }
+
+    break;
+
+  case VERIFY_SENSOR_MATCH:
 
     r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_MATCH, &mode, &error);
     if (!r)
