@@ -93,7 +93,7 @@ get_print_data_descriptor(FpPrint *print, gint8 template)
 }
 
 static void
-crfpmoc_set_print_data(FpPrint *print, gint8 template_idx, guint8 *template, size_t template_size, guint16 ec_max_outsize, guint16 max_templates)
+crfpmoc_set_print_data(FpPrint *print, gint8 template_idx, guint8 *template, size_t template_size, int16_t ec_max_outsize, int16_t max_templates)
 {
 
   fp_dbg("Setting print data");
@@ -118,41 +118,37 @@ crfpmoc_set_print_data(FpPrint *print, gint8 template_idx, guint8 *template, siz
     template_var = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, template, template_size, sizeof(guint8));
   }
 
-  fp_dbg("EC max outsize: %d, max templates: %d", ec_max_outsize, max_templates);
-
   fpi_data = g_variant_new("(@ay@ayii)", print_id_var, template_var, ec_max_outsize, max_templates);
   g_object_set(print, "fpi-data", fpi_data, NULL);
 }
 
 static void
-crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size, guint16 *ec_max_outsize, guint16 *max_templates)
+crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size, int16_t *ec_max_outsize, int16_t *max_templates)
 {
   g_autoptr(GVariant) fpi_data = NULL;
   g_autoptr(GVariant) template_var = NULL;
   const guint8 *template_data = NULL;
   gsize template_data_size = 0;
-  guint16 extracted_ec_max_outsize = 0;
-  guint16 extracted_max_templates = 0;
+  int16_t extracted_ec_max_outsize = 0;
+  int16_t extracted_max_templates = 0;
 
   if (template)
   {
+    if (*template)
+    {
+      g_free(*template);
+    }
     *template = NULL;
   }
+
   if (template_size)
-  {
     *template_size = 0;
-  }
   if (ec_max_outsize)
-  {
     *ec_max_outsize = 0;
-  }
   if (max_templates)
-  {
     *max_templates = 0;
-  }
 
   g_object_get(print, "fpi-data", &fpi_data, NULL);
-
   if (!fpi_data)
   {
     g_warning("No fpi-data found in the print object.");
@@ -160,37 +156,22 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
   }
 
   g_variant_get(fpi_data, "(@ay@ayii)", NULL, &template_var, &extracted_ec_max_outsize, &extracted_max_templates);
-
-  fp_dbg("EC max outsize: %d, max templates: %d", extracted_ec_max_outsize, extracted_max_templates);
-
-
   if (template_var)
   {
     template_data = g_variant_get_fixed_array(template_var, &template_data_size, sizeof(guint8));
     if (template_data && template_data_size > 0)
     {
       if (template)
-      {
         *template = g_memdup2(template_data, template_data_size);
-      }
       if (template_size)
-      {
         *template_size = template_data_size;
-      }
     }
   }
 
   if (ec_max_outsize)
-  {
     *ec_max_outsize = extracted_ec_max_outsize;
-  }
   if (max_templates)
-  {
     *max_templates = extracted_max_templates;
-  }
-
-
-
 }
 
 static gboolean
@@ -540,7 +521,7 @@ crfpmoc_ec_max_insize(FpiDeviceCrfpMoc *self, guint32 *max_insize, GError **erro
 }
 
 static gboolean
-crfpmoc_ec_max_outsize(FpiDeviceCrfpMoc *self, guint16 *max_outsize, GError **error)
+crfpmoc_ec_max_outsize(FpiDeviceCrfpMoc *self, int16_t *max_outsize, GError **error)
 {
   struct crfpmoc_ec_response_get_protocol_info protocol_info;
   gboolean rv;
@@ -640,7 +621,7 @@ static gboolean
 crfpmoc_fp_upload_template(FpiDeviceCrfpMoc *self,
                            const guint8 *template_data,
                            gsize template_size,
-                           guint16 ec_max_outsize,
+                           int16_t ec_max_outsize,
                            GError **error)
 {
   struct crfpmoc_ec_params_fp_template *p = NULL;
@@ -842,7 +823,7 @@ crfpmoc_enroll_run_state(FpiSsm *ssm, FpDevice *device)
   GError *error = NULL;
   struct crfpmoc_ec_response_fp_info info;
   guint8 *template = NULL;
-  guint16 ec_max_outsize = 10; // TODO: choose better default
+  int16_t ec_max_outsize = 10; // TODO: choose better default
 
   switch (fpi_ssm_get_cur_state(ssm))
   {
@@ -968,7 +949,7 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
 {
   FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC(device);
   FpPrint *print = NULL;
-  GPtrArray *prints;
+  g_autoptr(GPtrArray) prints = NULL;
   gboolean r;
   guint32 mode;
   gint8 template_idx = -1;
@@ -977,8 +958,8 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
   guint8 *template = NULL;
 
   size_t template_size = 0;
-  guint16 max_templates = 10;
-  guint16 ec_max_outsize = 10; // TODO: choose better default
+  int16_t max_templates = 10;
+  int16_t ec_max_outsize = 10; // TODO: choose better default
 
   switch (fpi_ssm_get_cur_state(ssm))
   {
@@ -993,11 +974,15 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
         for (guint index = 0; (index < prints->len) && (index < max_templates); index++)
         {
           print = g_ptr_array_index(prints, index);
-          crfpmoc_get_print_data(print, &template, &template_size, &ec_max_outsize, &max_templates);
-          crfpmoc_fp_upload_template(self, template, template_size, ec_max_outsize, &error);
-        }
 
-        g_free(template);
+          fp_dbg("Before getting print data");
+          crfpmoc_get_print_data(print, &template, &template_size, &ec_max_outsize, &max_templates);
+          fp_dbg("After getting print data");
+
+          crfpmoc_fp_upload_template(self, template, template_size, ec_max_outsize, &error);
+          g_free(template);
+          template = NULL;
+        }
       }
     }
     else
