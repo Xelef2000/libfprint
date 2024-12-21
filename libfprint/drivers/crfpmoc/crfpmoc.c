@@ -131,8 +131,7 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
   g_autoptr(GVariant) template_var = NULL;
   const guint8 *template_data = NULL;
   gsize template_data_size = 0;
-  guint16 extracted_ec_max_outsize = 0;
-  guint16 extracted_max_templates = 0;
+
 
   if (template)
   {
@@ -159,9 +158,8 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
     return;
   }
 
-  g_variant_get(fpi_data, "(@ay@ayii)", NULL, &template_var, &extracted_ec_max_outsize, &extracted_max_templates);
+  g_variant_get(fpi_data, "(@ay@ayii)", NULL, &template_var, ec_max_outsize, max_templates);
 
-  fp_dbg("EC max outsize: %d, max templates: %d", extracted_ec_max_outsize, extracted_max_templates);
 
 
   if (template_var)
@@ -179,16 +177,6 @@ crfpmoc_get_print_data(FpPrint *print, guint8 **template, size_t *template_size,
       }
     }
   }
-
-  if (ec_max_outsize)
-  {
-    *ec_max_outsize = extracted_ec_max_outsize;
-  }
-  if (max_templates)
-  {
-    *max_templates = extracted_max_templates;
-  }
-
 
 
 }
@@ -977,24 +965,35 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
   guint8 *template = NULL;
 
   size_t template_size = 0;
-  guint16 max_templates = 10;
-  guint16 ec_max_outsize = 10; // TODO: choose better default
+
+
+  guint16 fp_ec_max_outsize = 10; // TODO: choose better default
+  guint16 fp_max_templates = 10;
+
+  
 
   switch (fpi_ssm_get_cur_state(ssm))
   {
   case VERIFY_SENSOR_MATCH:
 
     gboolean is_identify = fpi_device_get_current_action(device) == FPI_DEVICE_ACTION_IDENTIFY;
+
+    
+
+
     if (is_identify)
     {
       fpi_device_get_identify_data(device, &prints);
       if (prints->len != 0)
       {
-        for (guint index = 0; (index < prints->len) && (index < max_templates); index++)
+        
+        for (guint index = 0; (index < prints->len) && (index < fp_max_templates); index++)
         {
           print = g_ptr_array_index(prints, index);
-          crfpmoc_get_print_data(print, &template, &template_size, &ec_max_outsize, &max_templates);
-          crfpmoc_fp_upload_template(self, template, template_size, ec_max_outsize, &error);
+         
+          crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
+
+          crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
         }
 
         g_free(template);
@@ -1004,8 +1003,8 @@ crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
     {
       fpi_device_get_verify_data(device, &print);
 
-      crfpmoc_get_print_data(print, &template, &template_size, &ec_max_outsize, &max_templates);
-      crfpmoc_fp_upload_template(self, template, template_size, ec_max_outsize, &error);
+      crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
+      crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
       g_free(template);
     }
 
