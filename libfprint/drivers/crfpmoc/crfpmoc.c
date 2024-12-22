@@ -385,6 +385,7 @@ crfpmoc_fp_set_context(FpiDeviceCrfpMoc *self,
     }
 
     fp_dbg("Context setting is still in progress. Attempt %d of %d", (i + 1), tries);
+    g_clear_error(error);
     *error = NULL;
   }
 
@@ -410,24 +411,6 @@ crfpmoc_cmd_fp_info(FpiDeviceCrfpMoc *self, guint16 *enrolled_templates, GError 
   fp_dbg("Templates: version %d size %d count %d/%d dirty bitmap %x", r.template_version, r.template_size, r.template_valid, r.template_max, r.template_dirty);
 
   *enrolled_templates = r.template_valid;
-  return TRUE;
-}
-
-static gboolean
-crfpmoc_cmd_fp_max_templates(FpiDeviceCrfpMoc *self, guint16 *max_templates, GError **error)
-{
-  struct crfpmoc_ec_response_fp_info r;
-  gboolean rv;
-
-  rv = crfpmoc_ec_command(self, CRFPMOC_EC_CMD_FP_INFO, 1, NULL, 0, &r, sizeof(r), error);
-  if (!rv)
-    return rv;
-
-  fp_dbg("Fingerprint sensor: vendor %x product %x model %x version %x", r.vendor_id, r.product_id, r.model_id, r.version);
-  fp_dbg("Image: size %dx%d %d bpp", r.width, r.height, r.bpp);
-  fp_dbg("Templates: version %d size %d count %d/%d dirty bitmap %x", r.template_version, r.template_size, r.template_valid, r.template_max, r.template_dirty);
-
-  *max_templates = r.template_max;
   return TRUE;
 }
 
@@ -494,8 +477,6 @@ crfmoc_cmd_fp_enshure_seed(FpiDeviceCrfpMoc *self, const char *seed, GError **er
 
   fp_dbg("FPMCU encryption status: %d", status);
 
-  // I don't know why the encryption status is 5 after using verify. Since it should be 1. It also returns to 1 after using enroll
-  // I am going to assume that 5 means that the seed is set, since setting the seed twice locks the device
   if (status == 0)
   {
     fp_dbg("Seed is not set, setting seed");
@@ -746,28 +727,16 @@ crfpmoc_set_keys(FpiDeviceCrfpMoc *self, GError **error)
   gboolean r;
   r = crfmoc_cmd_fp_enshure_seed(self, CRFPMOC_DEFAULT_SEED, error);
   if (!r)
-  {
-    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to ensure seed");
-  }
+    return FALSE;
 
   r = crfpmoc_fp_set_context(self, CRFPMOC_DEFAULT_CONTEXT, error);
   if (!r)
-  {
-    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to set context");
-  }
+    return FALSE;
 
-  return r;
+  return TRUE;
 }
 
-static gboolean
-crfpmoc_clear_context(FpiDeviceCrfpMoc *self)
-{
-  gboolean r;
-  GError *error = NULL;
-  r = crfpmoc_fp_set_context(self, CRFPMOC_DEFAULT_CONTEXT, &error);
 
-  return r;
-}
 
 static void
 crfpmoc_cancel(FpDevice *device)
@@ -813,114 +782,135 @@ crfpmoc_close(FpDevice *device)
 }
 
 static void
-crfpmoc_enroll_run_state(FpiSsm *ssm, FpDevice *device)
+handle_enroll_sensor_enroll(FpiSsm *ssm, FpiDeviceCrfpMoc *self)
 {
-  FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC(device);
-  EnrollPrint *enroll_print = fpi_ssm_get_data(ssm);
-  g_autofree gchar *user_id = NULL;
-  g_autofree gchar *device_print_id = NULL;
-  gboolean r;
-  guint32 mode;
-  guint16 enrolled_templates = 0;
-  GError *error = NULL;
-  struct crfpmoc_ec_response_fp_info info;
-  guint8 *template = NULL;
-  guint16 ec_max_outsize = 10; // TODO: choose better default
-
-  switch (fpi_ssm_get_cur_state(ssm))
-  {
-  case ENROLL_SENSOR_ENROLL:
-    r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_ENROLL_IMAGE | CRFPMOC_FP_MODE_ENROLL_SESSION, &mode, &error);
+    GError *error = NULL;
+    guint32 mode;
+    gboolean r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_ENROLL_IMAGE | CRFPMOC_FP_MODE_ENROLL_SESSION, &mode, &error);
     if (!r)
-      fpi_ssm_mark_failed(ssm, error);
+        fpi_ssm_mark_failed(ssm, error);
     else
-      fpi_ssm_next_state(ssm);
+        fpi_ssm_next_state(ssm);
+}
 
-    break;
-
-  case ENROLL_WAIT_FINGER:
+static void
+handle_enroll_wait_finger(FpDevice *device, FpiDeviceCrfpMoc *self)
+{
     fpi_device_report_finger_status(device, FP_FINGER_STATUS_NEEDED);
     crfpmoc_cmd_wait_event_fingerprint(self);
-    break;
+}
 
-  case ENROLL_SENSOR_CHECK:
-    r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error);
+static void
+handle_enroll_sensor_check(FpiSsm *ssm, FpDevice *device, FpiDeviceCrfpMoc *self, EnrollPrint *enroll_print)
+{
+    GError *error = NULL;
+    guint32 mode;
+    gboolean r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error);
     if (!r)
     {
-      fpi_ssm_mark_failed(ssm, error);
+        fpi_ssm_mark_failed(ssm, error);
     }
     else
     {
-      if (mode & CRFPMOC_FP_MODE_ENROLL_SESSION)
-      {
-        if (mode & CRFPMOC_FP_MODE_ENROLL_IMAGE)
+        if (mode & CRFPMOC_FP_MODE_ENROLL_SESSION)
         {
-          fpi_ssm_jump_to_state(ssm, ENROLL_WAIT_FINGER);
+            if (mode & CRFPMOC_FP_MODE_ENROLL_IMAGE)
+            {
+                fpi_ssm_jump_to_state(ssm, ENROLL_WAIT_FINGER);
+            }
+            else
+            {
+                fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
+
+                enroll_print->stage++;
+                fp_info("Partial capture successful (%d/%d).", enroll_print->stage, CRFPMOC_NR_ENROLL_STAGES);
+                fpi_device_enroll_progress(device, enroll_print->stage, enroll_print->print, NULL);
+
+                fpi_ssm_jump_to_state(ssm, ENROLL_SENSOR_ENROLL);
+            }
+        }
+        else if (mode == 0)
+        {
+            fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
+
+            fpi_ssm_next_state(ssm);
         }
         else
         {
-          fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
+            fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
 
-          enroll_print->stage++;
-          fp_info("Partial capture successful (%d/%d).", enroll_print->stage, CRFPMOC_NR_ENROLL_STAGES);
-          fpi_device_enroll_progress(device, enroll_print->stage, enroll_print->print, NULL);
+            fpi_device_enroll_progress(device, enroll_print->stage, NULL, fpi_device_retry_new_msg(FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
 
-          fpi_ssm_jump_to_state(ssm, ENROLL_SENSOR_ENROLL);
+            fpi_ssm_jump_to_state(ssm, ENROLL_SENSOR_ENROLL);
         }
-      }
-      else if (mode == 0)
-      {
-        fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
-
-        fpi_ssm_next_state(ssm);
-      }
-      else
-      {
-        fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
-
-        fpi_device_enroll_progress(device, enroll_print->stage, NULL, fpi_device_retry_new_msg(FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
-
-        fpi_ssm_jump_to_state(ssm, ENROLL_SENSOR_ENROLL);
-      }
     }
+}
 
-    break;
+static void
+handle_enroll_commit(FpiSsm *ssm, FpDevice *device, FpiDeviceCrfpMoc *self, EnrollPrint *enroll_print)
+{
+    GError *error = NULL;
+    guint16 enrolled_templates = 0;
+    guint8 *template = NULL;
+    guint16 ec_max_outsize = 10;
+    struct crfpmoc_ec_response_fp_info info;
 
-  case ENROLL_COMMIT:
     crfpmoc_cmd_fp_info(self, &enrolled_templates, &error);
     fp_dbg("Number of enrolled templates is: %d", enrolled_templates);
 
-    user_id = fpi_print_generate_user_id(enroll_print->print);
+    g_autofree gchar *user_id = fpi_print_generate_user_id(enroll_print->print);
     fp_dbg("New fingerprint ID: %s", user_id);
 
     g_object_set(enroll_print->print, "description", user_id, NULL);
 
-    r = crfpmoc_fp_download_template(self, &info, enrolled_templates - 1, &template, &error);
+    gboolean r = crfpmoc_fp_download_template(self, &info, enrolled_templates - 1, &template, &error);
     r = crfpmoc_ec_max_outsize(self, &ec_max_outsize, &error);
 
     if (!r)
     {
-      g_warning("Failed to download template: %s", error->message);
-      g_clear_error(&error);
-      crfpmoc_set_print_data(enroll_print->print, enrolled_templates - 1, NULL, 0, ec_max_outsize, info.template_max);
+        fp_err("Failed to download template");
+        crfpmoc_set_print_data(enroll_print->print, enrolled_templates - 1, NULL, 0, ec_max_outsize, info.template_max);
+        fpi_ssm_mark_failed(ssm, fpi_device_retry_new_msg(FP_DEVICE_RETRY_GENERAL, "Failed to download template"));
     }
     else
     {
-      crfpmoc_set_print_data(enroll_print->print, enrolled_templates - 1, template, info.template_size, ec_max_outsize, info.template_max);
+        crfpmoc_set_print_data(enroll_print->print, enrolled_templates - 1, template, info.template_size, ec_max_outsize, info.template_max);
     }
 
     g_free(template);
 
     fp_info("Enrollment was successful!");
-
-    // crfpmoc_clear_context(self);
-
     fpi_device_enroll_complete(device, g_object_ref(enroll_print->print), NULL);
 
     fpi_ssm_mark_completed(ssm);
-    break;
-  }
 }
+
+static void
+crfpmoc_enroll_run_state(FpiSsm *ssm, FpDevice *device)
+{
+    FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC(device);
+    EnrollPrint *enroll_print = fpi_ssm_get_data(ssm);
+
+    switch (fpi_ssm_get_cur_state(ssm))
+    {
+    case ENROLL_SENSOR_ENROLL:
+        handle_enroll_sensor_enroll(ssm, self);
+        break;
+
+    case ENROLL_WAIT_FINGER:
+        handle_enroll_wait_finger(device, self);
+        break;
+
+    case ENROLL_SENSOR_CHECK:
+        handle_enroll_sensor_check(ssm, device, self, enroll_print);
+        break;
+
+    case ENROLL_COMMIT:
+        handle_enroll_commit(ssm, device, self, enroll_print);
+        break;
+    }
+}
+
 
 static void
 crfpmoc_enroll(FpDevice *device)
@@ -948,169 +938,191 @@ crfpmoc_enroll(FpDevice *device)
 }
 
 static void
-crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
+handle_verify_upload_template(FpiSsm *ssm, FpDevice *device, FpiDeviceCrfpMoc *self)
 {
-  FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC(device);
-  FpPrint *print = NULL;
-  GPtrArray *prints;
-  gboolean r = FALSE;
-  gboolean rl = FALSE;
-  guint32 mode;
-  gint8 template_idx = -1;
-  GError *error;
-
-  guint8 *template = NULL;
-
-  size_t template_size = 0;
-
-  guint16 fp_ec_max_outsize = 10; // TODO: choose better default
-  guint16 fp_max_templates = 10;
-
-  switch (fpi_ssm_get_cur_state(ssm))
-  {
-  case VERIFY_UPLOAD_TEMPLATE:
+    GError *error = NULL;
+    gboolean r = FALSE, rl = FALSE;
+    guint16 fp_ec_max_outsize = 10;
+    guint16 fp_max_templates = 10;
+    guint8 *template = NULL;
+    size_t template_size = 0;
+    FpPrint *print = NULL;
+    GPtrArray *prints;
 
     gboolean is_identify = fpi_device_get_current_action(device) == FPI_DEVICE_ACTION_IDENTIFY;
 
     if (is_identify)
     {
-      fpi_device_get_identify_data(device, &prints);
-      if (prints->len != 0)
-      {
-
-        r = FALSE;
-        for (guint index = 0; (index < prints->len) && (index < fp_max_templates); index++)
+        fpi_device_get_identify_data(device, &prints);
+        if (prints->len != 0)
         {
-          print = g_ptr_array_index(prints, index);
+            for (guint index = 0; (index < prints->len) && (index < fp_max_templates); index++)
+            {
+                print = g_ptr_array_index(prints, index);
 
-          crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
+                crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
 
-          rl = crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
+                rl = crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
 
-          if (rl)
-          {
-            r = TRUE;
-          }
-          else
-          {
-            fp_warn("Failed to upload template nr %d: %s", index, error->message);
-            g_clear_error(&error);
-          }
+                if (rl)
+                {
+                    r = TRUE;
+                }
+                else
+                {
+                    fp_warn("Failed to upload template nr %d: %s", index, error->message);
+                    g_clear_error(&error);
+                }
 
-          g_free(template);
+                g_free(template);
+            }
         }
-      }
     }
     else
     {
-      fpi_device_get_verify_data(device, &print);
+        fpi_device_get_verify_data(device, &print);
 
-      crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
-      r = crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
-      g_free(template);
+        crfpmoc_get_print_data(print, &template, &template_size, &fp_ec_max_outsize, &fp_max_templates);
+        r = crfpmoc_fp_upload_template(self, template, template_size, fp_ec_max_outsize, &error);
+        g_free(template);
     }
 
     if (!r)
     {
-      fp_err("No template could be uploaded");
-      fpi_ssm_mark_failed(ssm, error);
+        fp_err("No template could be uploaded");
+        fpi_ssm_mark_failed(ssm, error);
     }
     else
     {
-      fpi_ssm_next_state(ssm);
+        fpi_ssm_next_state(ssm);
     }
+}
 
-    break;
-
-  case VERIFY_SENSOR_MATCH:
-
-    r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_MATCH, &mode, &error);
+static void
+handle_verify_sensor_match(FpiSsm *ssm, FpiDeviceCrfpMoc *self)
+{
+    GError *error = NULL;
+    guint32 mode;
+    gboolean r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_MATCH, &mode, &error);
     if (!r)
-      fpi_ssm_mark_failed(ssm, error);
+        fpi_ssm_mark_failed(ssm, error);
     else
-      fpi_ssm_next_state(ssm);
-    break;
+        fpi_ssm_next_state(ssm);
+}
 
-  case VERIFY_WAIT_FINGER:
+static void
+handle_verify_wait_finger(FpDevice *device, FpiDeviceCrfpMoc *self)
+{
     fpi_device_report_finger_status(device, FP_FINGER_STATUS_NEEDED);
     crfpmoc_cmd_wait_event_fingerprint(self);
-    break;
-
-  case VERIFY_SENSOR_CHECK:
-    r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error);
-    if (!r)
-    {
-      fpi_ssm_mark_failed(ssm, error);
-    }
-    else
-    {
-      if (mode & CRFPMOC_FP_MODE_MATCH)
-      {
-        fpi_ssm_jump_to_state(ssm, VERIFY_WAIT_FINGER);
-      }
-      else if (mode == 0)
-      {
-        fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
-
-        fpi_ssm_next_state(ssm);
-      }
-      else
-      {
-        fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
-
-        fpi_ssm_mark_failed(ssm, fpi_device_retry_new_msg(FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
-      }
-    }
-    break;
-
-  case VERIFY_CHECK:
-    r = crfpmoc_cmd_fp_stats(self, &template_idx, &error);
-    if (!r)
-    {
-      fpi_ssm_mark_failed(ssm, error);
-    }
-    else
-    {
-      is_identify = fpi_device_get_current_action(device) == FPI_DEVICE_ACTION_IDENTIFY;
-      if (template_idx == -1)
-      {
-        fp_info("Print was not identified by the device");
-
-        if (is_identify)
-          fpi_device_identify_report(device, NULL, NULL, NULL);
-        else
-          fpi_device_verify_report(device, FPI_MATCH_FAIL, NULL, NULL);
-      }
-      else
-      {
-        // print = fp_print_new (device);
-
-        // crfpmoc_set_print_data (print, template_idx, NULL, 0, 0, 0);
-
-        fp_info("Identify successful for template %d", template_idx);
-
-        if (is_identify)
-        {
-          fpi_device_get_identify_data(device, &prints);
-          fpi_device_identify_report(device, g_ptr_array_index(prints, template_idx), print, NULL);
-        }
-        else
-        {
-          fpi_device_get_verify_data(device, &print);
-          fpi_device_verify_report(device, FPI_MATCH_SUCCESS, print, NULL);
-        }
-      }
-      if (is_identify)
-        fpi_device_identify_complete(device, NULL);
-      else
-        fpi_device_verify_complete(device, NULL);
-      fpi_ssm_mark_completed(ssm);
-    }
-
-    // crfpmoc_clear_context(self);
-    break;
-  }
 }
+
+static void
+handle_verify_sensor_check(FpiSsm *ssm, FpDevice *device, FpiDeviceCrfpMoc *self)
+{
+    GError *error = NULL;
+    guint32 mode;
+    gboolean r = crfpmoc_cmd_fp_mode(self, CRFPMOC_FP_MODE_DONT_CHANGE, &mode, &error);
+    if (!r)
+    {
+        fpi_ssm_mark_failed(ssm, error);
+    }
+    else
+    {
+        if (mode & CRFPMOC_FP_MODE_MATCH)
+        {
+            fpi_ssm_jump_to_state(ssm, VERIFY_WAIT_FINGER);
+        }
+        else if (mode == 0)
+        {
+            fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
+            fpi_ssm_next_state(ssm);
+        }
+        else
+        {
+            fpi_device_report_finger_status(device, FP_FINGER_STATUS_PRESENT);
+            fpi_ssm_mark_failed(ssm, fpi_device_retry_new_msg(FP_DEVICE_RETRY_GENERAL, "FP mode: (0x%x)", mode));
+        }
+    }
+}
+
+static void
+handle_verify_check(FpiSsm *ssm, FpDevice *device, FpiDeviceCrfpMoc *self)
+{
+    GError *error = NULL;
+    gint8 template_idx = -1;
+    gboolean is_identify = fpi_device_get_current_action(device) == FPI_DEVICE_ACTION_IDENTIFY;
+    GPtrArray *prints;
+    FpPrint *print = NULL;
+
+    gboolean r = crfpmoc_cmd_fp_stats(self, &template_idx, &error);
+    if (!r)
+    {
+        fpi_ssm_mark_failed(ssm, error);
+    }
+    else
+    {
+        if (template_idx == -1)
+        {
+            fp_info("Print was not identified by the device");
+
+            if (is_identify)
+                fpi_device_identify_report(device, NULL, NULL, NULL);
+            else
+                fpi_device_verify_report(device, FPI_MATCH_FAIL, NULL, NULL);
+        }
+        else
+        {
+            fp_info("Identify successful for template %d", template_idx);
+
+            if (is_identify)
+            {
+                fpi_device_get_identify_data(device, &prints);
+                fpi_device_identify_report(device, g_ptr_array_index(prints, template_idx), print, NULL);
+            }
+            else
+            {
+                fpi_device_get_verify_data(device, &print);
+                fpi_device_verify_report(device, FPI_MATCH_SUCCESS, print, NULL);
+            }
+        }
+        if (is_identify)
+            fpi_device_identify_complete(device, NULL);
+        else
+            fpi_device_verify_complete(device, NULL);
+        fpi_ssm_mark_completed(ssm);
+    }
+}
+
+static void
+crfpmoc_verify_run_state(FpiSsm *ssm, FpDevice *device)
+{
+    FpiDeviceCrfpMoc *self = FPI_DEVICE_CRFPMOC(device);
+
+    switch (fpi_ssm_get_cur_state(ssm))
+    {
+    case VERIFY_UPLOAD_TEMPLATE:
+        handle_verify_upload_template(ssm, device, self);
+        break;
+
+    case VERIFY_SENSOR_MATCH:
+        handle_verify_sensor_match(ssm, self);
+        break;
+
+    case VERIFY_WAIT_FINGER:
+        handle_verify_wait_finger(device, self);
+        break;
+
+    case VERIFY_SENSOR_CHECK:
+        handle_verify_sensor_check(ssm, device, self);
+        break;
+
+    case VERIFY_CHECK:
+        handle_verify_check(ssm, device, self);
+        break;
+    }
+}
+
 
 static void
 crfpmoc_identify_verify(FpDevice *device)
