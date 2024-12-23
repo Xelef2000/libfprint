@@ -41,7 +41,11 @@
             gtk-doc
             gdb
             valgrind
-            (pkgs.callPackage ./cros-ectool.nix { })
+            umockdev
+            python312Packages.pygobject3
+            python312Packages.pygobject-stubs
+            tshark
+            # (pkgs.callPackage ./cros-ectool.nix { })
 
             # Add libfprint with an override
             (pkgs.libfprint.overrideAttrs (oldAttrs: {

@@ -56,11 +56,14 @@ p = d.enroll_sync(template, None, enroll_progress, None)
 assert d.get_finger_status() == FPrint.FingerStatusFlags.NONE
 print("enroll done")
 
+print(p)
+
 print("verifying")
 assert d.get_finger_status() == FPrint.FingerStatusFlags.NONE
 verify_res, verify_print = d.verify_sync(p)
 assert d.get_finger_status() == FPrint.FingerStatusFlags.NONE
 print("verify done")
+print(verify_res, verify_print)
 assert verify_res == True
 
 identified = False
