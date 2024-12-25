@@ -990,12 +990,10 @@ handle_verify_upload_template(FpiSsm *ssm, FpDevice *device, FpiDeviceCrfpMoc *s
   if (!upload_successful)
   {
     fp_err("No template could be uploaded");
-    fpi_ssm_mark_failed(ssm, error);
   }
-  else
-  {
-    fpi_ssm_next_state(ssm);
-  }
+  
+  fpi_ssm_next_state(ssm);
+  
 }
 
 static void
